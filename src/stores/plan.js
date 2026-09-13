@@ -6,6 +6,12 @@ import { addDays, diffDays, parseDateKey, todayKey, toDateKey } from '@/utils/da
 import { createId } from '@/utils/id'
 import { createDebouncedWriter } from '@/utils/persist'
 import { readJSON } from '@/utils/storage'
+import {
+  activeTombstones,
+  markDeleted,
+  markDeletedMany,
+  setTombstones,
+} from '@/utils/tombstone'
 import { sanitizeLink } from '@/utils/url'
 
 const STORAGE_KEY = 'reviewplan:data:v1'
@@ -13,8 +19,9 @@ const STORAGE_KEY = 'reviewplan:data:v1'
 /**
  * 导出数据的格式版本；导入时用它判断备份是否来自更新的版本。
  * v2：导出内容在待办 / 计划之外额外带上了日程广场的系列合集。
+ * v3：条目带上 updatedAt、快照带上 gaokaoDateUpdatedAt 与删除标记，用于两端按条目合并。
  */
-export const DATA_VERSION = 2
+export const DATA_VERSION = 3
 
 /** 默认高考日期（2027 年高考首日） */
 export const DEFAULT_GAOKAO_DATE = '2027-06-07'
@@ -65,6 +72,8 @@ function normalizeTodo(raw) {
     link: sanitizeLink(raw?.link),
     source: raw?.source || 'manual',
     createdAt: toNumber(raw?.createdAt, Date.now()),
+    // 0 表示历史数据（没有时间戳），合并时视为最旧
+    updatedAt: toNumber(raw?.updatedAt, 0),
   }
 }
 
@@ -101,6 +110,8 @@ export const usePlanStore = defineStore('plan', () => {
   )
   const todos = ref(Array.isArray(persisted.todos) ? persisted.todos.map(normalizeTodo) : [])
   const plans = ref(Array.isArray(persisted.plans) ? persisted.plans.map(normalizePlan) : [])
+  /** 高考日期自身的修改时间：合并两端快照时用来判断该用谁的日期 */
+  const gaokaoDateUpdatedAt = ref(toNumber(persisted.gaokaoDateUpdatedAt, 0))
 
   // ---------- 派生数据 ----------
 
@@ -172,6 +183,7 @@ export const usePlanStore = defineStore('plan', () => {
       link: sanitizeLink(link),
       source,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     }
     todos.value.push(todo)
     return todo
@@ -179,6 +191,7 @@ export const usePlanStore = defineStore('plan', () => {
 
   function removeTodo(id) {
     if (!ensureWritable()) return
+    markDeleted(id)
     todos.value = todos.value.filter((todo) => todo.id !== id)
   }
 
@@ -229,6 +242,7 @@ export const usePlanStore = defineStore('plan', () => {
       note,
       done: false,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     }
     plans.value.push(plan)
     return plan
@@ -242,6 +256,8 @@ export const usePlanStore = defineStore('plan', () => {
     if (index === -1) return null
 
     const [todo] = todos.value.splice(index, 1)
+    // 待办被「消耗」成计划：记一笔删除，否则合并时会被另一端的副本复活
+    markDeleted(todo.id)
     // 没指定时长时先占满这一小时的格子，之后再拖块边缘调整跨度
     return addPlan({
       ...todo,
@@ -262,6 +278,7 @@ export const usePlanStore = defineStore('plan', () => {
     if (index === -1) return
 
     const [plan] = plans.value.splice(index, 1)
+    markDeleted(plan.id)
     todos.value.push({
       id: createId('todo'),
       title: plan.title,
@@ -273,6 +290,7 @@ export const usePlanStore = defineStore('plan', () => {
       link: plan.link || '',
       source: plan.source || 'manual',
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     })
   }
 
@@ -283,6 +301,7 @@ export const usePlanStore = defineStore('plan', () => {
     if (!plan) return
     plan.date = date
     plan.startHour = startHour
+    plan.updatedAt = Date.now()
   }
 
   /** 横向拉伸计划块：调整开始时间 / 时长（时间跨度） */
@@ -293,6 +312,7 @@ export const usePlanStore = defineStore('plan', () => {
     if (!plan) return
     if (Number.isFinite(startHour)) plan.startHour = startHour
     if (Number.isFinite(duration)) plan.duration = Math.max(Math.round(duration), 15)
+    plan.updatedAt = Date.now()
   }
 
   /**
@@ -324,17 +344,21 @@ export const usePlanStore = defineStore('plan', () => {
       )
     }
 
+    plan.updatedAt = Date.now()
     return plan
   }
 
   function togglePlanDone(planId) {
     if (!ensureWritable()) return
     const plan = plans.value.find((item) => item.id === planId)
-    if (plan) plan.done = !plan.done
+    if (!plan) return
+    plan.done = !plan.done
+    plan.updatedAt = Date.now()
   }
 
   function removePlan(planId) {
     if (!ensureWritable()) return
+    markDeleted(planId)
     plans.value = plans.value.filter((plan) => plan.id !== planId)
   }
 
@@ -342,7 +366,9 @@ export const usePlanStore = defineStore('plan', () => {
 
   function setGaokaoDate(date) {
     if (!ensureWritable()) return
-    if (date) gaokaoDate.value = date
+    if (!date) return
+    gaokaoDate.value = date
+    gaokaoDateUpdatedAt.value = Date.now()
   }
 
   function exportData() {
@@ -351,8 +377,10 @@ export const usePlanStore = defineStore('plan', () => {
         version: DATA_VERSION,
         exportedAt: new Date().toISOString(),
         gaokaoDate: gaokaoDate.value,
+        gaokaoDateUpdatedAt: gaokaoDateUpdatedAt.value,
         todos: todos.value,
         plans: plans.value,
+        deleted: activeTombstones(),
       },
       null,
       2,
@@ -374,14 +402,22 @@ export const usePlanStore = defineStore('plan', () => {
     // 逐条归一化：缺 id / 非法日期 / 越界时长都会被修正，不会写进脏数据
     if (Array.isArray(data.todos)) todos.value = data.todos.map(normalizeTodo)
     if (Array.isArray(data.plans)) plans.value = data.plans.map(normalizePlan)
-    if (isValidDateKey(data.gaokaoDate)) gaokaoDate.value = data.gaokaoDate
+    if (isValidDateKey(data.gaokaoDate)) {
+      gaokaoDate.value = data.gaokaoDate
+      // 快照没带时间戳（历史数据）就记 0，避免本地旧时间戳让后续合并判断失真
+      gaokaoDateUpdatedAt.value = toNumber(data.gaokaoDateUpdatedAt, 0)
+    }
+    if (Array.isArray(data.deleted)) setTombstones(data.deleted)
   }
 
   function resetAll() {
     if (!ensureWritable()) return
+    // 清空也是一次删除：不记标记的话，另一端残留的副本会把数据带回来
+    markDeletedMany([...todos.value.map((item) => item.id), ...plans.value.map((item) => item.id)])
     todos.value = []
     plans.value = []
     gaokaoDate.value = DEFAULT_GAOKAO_DATE
+    gaokaoDateUpdatedAt.value = Date.now()
   }
 
   // ---------- 持久化 ----------
@@ -389,15 +425,19 @@ export const usePlanStore = defineStore('plan', () => {
   // 拖拽 / 拉伸会以帧频修改数据，防抖合并写入，避免每帧都全量序列化
   const persistWriter = createDebouncedWriter(STORAGE_KEY, () => ({
     gaokaoDate: gaokaoDate.value,
+    gaokaoDateUpdatedAt: gaokaoDateUpdatedAt.value,
     todos: todos.value,
     plans: plans.value,
   }))
 
-  watch([gaokaoDate, todos, plans], () => persistWriter.schedule(), { deep: true })
+  watch([gaokaoDate, gaokaoDateUpdatedAt, todos, plans], () => persistWriter.schedule(), {
+    deep: true,
+  })
 
   return {
     // state
     gaokaoDate,
+    gaokaoDateUpdatedAt,
     todos,
     plans,
     // getters

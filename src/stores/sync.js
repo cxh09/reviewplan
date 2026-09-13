@@ -6,7 +6,9 @@ import { DATA_VERSION, usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
 import { fetchHealth, fetchSnapshot, normalizeServerUrl, putSnapshot } from '@/utils/api'
 import { connectionState, isOnline, setConnectionState } from '@/utils/connection'
+import { mergeSnapshots } from '@/utils/merge'
 import { readJSON, writeJSON } from '@/utils/storage'
+import { activeTombstones } from '@/utils/tombstone'
 
 const STORAGE_KEY = 'reviewplan:server:v1'
 
@@ -28,7 +30,8 @@ function loadPersisted() {
  * - 启动先按本地缓存渲染，随后 connect() 拉取云端覆盖；
  * - 连不上时进入只读，并每隔几秒自动重试；
  * - 在线期间任何改动都会自动上传（合并 300ms 内的连续改动）；
- * - 版本冲突（409）按「以云端为准」处理：丢弃本地这次改动，重新拉取云端数据。
+ * - 版本冲突（409）不丢改动：拉云端快照与本地按条目（last-write-wins）合并后重推，
+ *   合并依赖条目上的 updatedAt 与删除标记，见 utils/merge.js、utils/tombstone.js。
  */
 export const useSyncStore = defineStore('sync', () => {
   const persisted = loadPersisted()
@@ -72,6 +75,12 @@ export const useSyncStore = defineStore('sync', () => {
   let connecting = false
   /** 连接过程中又被要求连接（改了地址 / 点了刷新）：本次结束后补做一次 */
   let reconnectQueued = false
+  /**
+   * 上次同步成功时用的服务端地址。
+   * 本地缓存只有在地址没变时才和这个服务端对得上，这时才敢做合并，
+   * 否则会把上一个服务端的数据混进来。
+   */
+  let syncedUrl = persisted.lastSyncedUrl || ''
 
   function persist() {
     writeJSON(STORAGE_KEY, {
@@ -79,6 +88,7 @@ export const useSyncStore = defineStore('sync', () => {
       accessToken: accessToken.value,
       lastSyncAt: lastSyncAt.value,
       rev: rev.value,
+      lastSyncedUrl: syncedUrl,
     })
   }
 
@@ -109,9 +119,11 @@ export const useSyncStore = defineStore('sync', () => {
     const plazaStore = usePlazaStore()
     return {
       gaokaoDate: planStore.gaokaoDate,
+      gaokaoDateUpdatedAt: planStore.gaokaoDateUpdatedAt,
       todos: JSON.parse(JSON.stringify(planStore.todos)),
       plans: JSON.parse(JSON.stringify(planStore.plans)),
       collections: plazaStore.exportData(),
+      deleted: activeTombstones(),
     }
   }
 
@@ -124,8 +136,10 @@ export const useSyncStore = defineStore('sync', () => {
       planStore.importData({
         version: DATA_VERSION,
         gaokaoDate: data?.gaokaoDate,
+        gaokaoDateUpdatedAt: data?.gaokaoDateUpdatedAt,
         todos: data?.todos,
         plans: data?.plans,
+        deleted: data?.deleted,
       })
       if (Array.isArray(data?.collections)) plazaStore.importData(data.collections)
       // 等 watch 回调跑完再解除挂起，确保这次变更不会被当成用户改动推回去
@@ -169,17 +183,32 @@ export const useSyncStore = defineStore('sync', () => {
       }
 
       // 服务端还没有数据时保留本地缓存，等用户第一次改动再整体上传
-      if (snapshot.data) await applyRemote(snapshot.data)
+      let merged = null
+      if (snapshot.data) {
+        // 本地缓存还属于这个服务端时做一次合并，把上一次没推上去的改动救回来；
+        // 换了服务端就直接以云端为准，免得把上一个服务端的数据混进来
+        const canMerge = syncedUrl === url && Number(snapshot.rev) > 0
+        merged = canMerge ? mergeSnapshots(buildPayload(), snapshot.data) : snapshot.data
+        await applyRemote(merged)
+      }
 
       rev.value = Number(snapshot.rev) || 0
       if (snapshot.updatedAt) lastSyncAt.value = Date.parse(snapshot.updatedAt) || Date.now()
-      syncedJson = JSON.stringify(buildPayload())
+      syncedUrl = url
+
+      // 合并结果比云端新（本地有没推上去的改动）时，把指纹记成云端那份，
+      // 让随后的 schedulePush 把合并结果补推上去
+      const localJson = JSON.stringify(buildPayload())
+      const mergedJson = merged ? JSON.stringify(merged) : ''
+      syncedJson =
+        mergedJson && mergedJson !== localJson ? JSON.stringify(snapshot.data) : localJson
       persist()
 
       setConnectionState('online')
       error.value = ''
       message.value = `已连接云端 · 版本 ${rev.value}`
       clearRetry()
+      schedulePush()
       return { ok: true, rev: rev.value }
     } catch (err) {
       if (err.isUnauthorized) {
@@ -271,14 +300,7 @@ export const useSyncStore = defineStore('sync', () => {
       persist()
       return { ok: true, rev: rev.value }
     } catch (err) {
-      if (err.isConflict) {
-        // 冲突策略：以云端为准，丢弃本地这次改动
-        const pulled = await connect()
-        if (pulled.ok) {
-          MessagePlugin.warning('数据已被其它设备修改，已自动同步为云端最新版本')
-        }
-        return { ok: false, conflict: true }
-      }
+      if (err.isConflict) return resolveConflict()
 
       error.value = err.isUnauthorized
         ? '访问令牌不正确，请在「设置 → 服务端同步」里检查'
@@ -295,6 +317,54 @@ export const useSyncStore = defineStore('sync', () => {
         pushAgain = false
         schedulePush()
       }
+    }
+  }
+
+  /**
+   * 版本冲突：拉云端最新快照，与本地按条目合并后重新上传。
+   * 这样两端各改各的都不会互相覆盖；一直合不上才退化为「以云端为准」，保证两端最终一致。
+   * @param {number} attempt 已重试次数
+   */
+  async function resolveConflict(attempt = 0) {
+    const url = normalizedUrl.value
+    const token = accessToken.value
+
+    try {
+      const snapshot = await fetchSnapshot(url, token)
+      const remote = snapshot.data
+
+      // 云端空着：直接把本地整份推上去
+      if (!remote) {
+        const local = buildPayload()
+        const result = await putSnapshot(url, token, local, null)
+        rev.value = Number(result.rev) || rev.value
+        lastSyncAt.value = Date.parse(result.updatedAt) || Date.now()
+        syncedJson = JSON.stringify(local)
+        syncedUrl = url
+        persist()
+        return { ok: true, rev: rev.value }
+      }
+
+      const merged = mergeSnapshots(buildPayload(), remote)
+      await applyRemote(merged)
+
+      const result = await putSnapshot(url, token, merged, Number(snapshot.rev) || 0)
+      rev.value = Number(result.rev) || rev.value
+      lastSyncAt.value = Date.parse(result.updatedAt) || Date.now()
+      syncedJson = JSON.stringify(merged)
+      syncedUrl = url
+      persist()
+
+      MessagePlugin.info('数据已被其它设备修改，已自动合并双方的改动')
+      return { ok: true, rev: rev.value, merged: true }
+    } catch (error) {
+      // 合并期间又有别的设备提交，再合一次
+      if (error.isConflict && attempt < 2) return resolveConflict(attempt + 1)
+
+      // 实在合不上：退回「以云端为准」，至少保证两端一致
+      const pulled = await connect()
+      if (pulled.ok) MessagePlugin.warning('数据已被其它设备修改，已同步为云端最新版本')
+      return { ok: false, conflict: true, error: error.message }
     }
   }
 
@@ -318,8 +388,9 @@ export const useSyncStore = defineStore('sync', () => {
     if (next === serverUrl.value) return
 
     serverUrl.value = next
-    // 换了服务端，版本号与指纹都作废
+    // 换了服务端，版本号、指纹都作废；本地缓存也不再属于新地址，不能参与合并
     rev.value = 0
+    syncedUrl = ''
     syncedJson = ''
     message.value = ''
     error.value = ''
@@ -347,6 +418,7 @@ export const useSyncStore = defineStore('sync', () => {
     accessToken.value = ''
     rev.value = 0
     lastSyncAt.value = 0
+    syncedUrl = ''
     syncedJson = ''
     message.value = ''
     error.value = ''

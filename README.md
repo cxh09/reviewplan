@@ -64,6 +64,8 @@ src/
 │   ├── connection.js     # 全局连接状态与只读判定
 │   ├── date.js           # 日期计算（含高考倒计时）
 │   ├── id.js             # 随机 id
+│   ├── merge.js          # 快照按条目合并（last-write-wins）
+│   ├── tombstone.js      # 删除标记：避免被删除的条目被另一端复活
 │   └── url.js            # 链接归一化（只放行 http / https）
 ├── views/
 │   ├── HomeView.vue      # 首页
@@ -88,7 +90,7 @@ server/                  # 数据同步服务端（独立子项目）
 
 ```js
 // 待办清单：还没有安排具体时间的任务
-todo = { id, title, category, duration, level, desc, source, createdAt }
+todo = { id, title, category, duration, level, desc, link, source, createdAt, updatedAt }
 
 // 排版计划：已安排到某天某个时段的复习任务
 plan = {
@@ -97,22 +99,38 @@ plan = {
   title,
   category,
   duration,
+  originDuration,
   level,
   desc,
+  link,
   source,
   date,
   startHour,
   note,
   done,
   createdAt,
+  updatedAt,
 }
 
 // 系列合集：用户自己在日程广场维护的日程分组
-collection = { id, name, desc, category, color, builtin, createdAt, updatedAt, items: [item] }
+collection = { id, name, desc, category, color, createdAt, updatedAt, items: [item] }
 
 // 合集里的日程：未加入待办前的「素材」
-item = { id, title, category, level, duration, desc }
+item = { id, title, category, level, duration, desc, link, updatedAt }
+
+// 随快照一起同步的整份数据（服务端存的就是它）：
+// 前几项之外，还有高考日期自身的修改时间与删除标记
+snapshot = {
+  gaokaoDate,
+  gaokaoDateUpdatedAt,
+  todos: [todo],
+  plans: [plan],
+  collections: [collection],
+  deleted: [{ id, at }],
+}
 ```
+
+> `updatedAt` 是条目最后一次修改时间，`deleted` 是删除标记，两者都只服务于多端合并，历史数据没有 `updatedAt` 时按 0 处理。
 
 ## 日程广场
 
@@ -156,7 +174,7 @@ npm run server:dev       # 开发模式，改动自动重启
 | ------ | ------------- | -------------------------------------------------- |
 | `GET`  | `/api/health` | 健康检查，返回服务端版本与是否开启令牌校验         |
 | `GET`  | `/api/data`   | 拉取整份快照，返回 `rev`（版本号）与 `updatedAt`   |
-| `PUT`  | `/api/data`   | 上传整份快照，带 `rev` 做乐观锁冲突检测；`rev: null` 表示强制覆盖（导入 / 清空用） |
+| `PUT`  | `/api/data`   | 上传整份快照，带 `rev` 做乐观锁冲突检测（校验与写入在同一个事务里）；`rev: null` 表示强制覆盖（导入 / 清空用） |
 
 服务端的访问令牌已硬编码在 `server/src/config.js` 的 `DEFAULT_ACCESS_TOKEN`（只认这一个值）；网页端**不预置**令牌，需要手动填写同一个令牌并保存，否则数据接口会返回 401。想换成自己的令牌，改 `server/src/config.js` 里的 `DEFAULT_ACCESS_TOKEN` 即可。
 
@@ -165,11 +183,21 @@ npm run server:dev       # 开发模式，改动自动重启
 网页端以**云端为唯一数据源**，不再支持「纯本地使用」：
 
 1. 打开页面先用浏览器缓存渲染，避免白屏；
-2. 立刻连接服务端，拉取云端数据覆盖缓存；
+2. 立刻连接服务端：拉云端数据；如果本地缓存属于**同一个服务端**且里面还有没推上去的改动，就按条目合并而不是直接覆盖；
 3. **连上之前一律只读**——顶部会显示状态条（连接中 / 连接失败 / 未配置），连不上时每 3 秒自动重试并保持只读；
 4. 连接成功后，**任何改动都会立即上传**（300ms 内连续改动会合并，拖拽不会打满请求）；
-5. 多端同时改动时**以云端为准**：本地这次改动会被丢弃，页面自动刷新为云端最新数据并给出提示；
-6. 页面关闭 / 切到后台前，会把还没发出去的改动补发一次。
+5. 页面关闭 / 切到后台前，会把还没发出去的改动补发一次。
+
+### 多端同时改动怎么合
+
+每个待办 / 计划 / 合集 / 合集里的日程都带一个 `updatedAt`，删除动作会额外记一条删除标记（`id + at`）。上传时服务端用 `rev` 做乐观锁，一旦发现版本被别人抢先，**不再丢弃本地的改动**，而是：
+
+1. 拉取云端最新快照；
+2. 按条目做 last-write-wins 合并——同一条谁的时间戳新谁生效，时间戳相同时以云端为准；
+3. 删除标记保证「一端删掉的条目」不会被另一端残留的副本复活；
+4. 用云端最新的 `rev` 把合并结果推回去，所以两端各改各的都不会互相覆盖（提示「已自动合并双方的改动」）。
+
+只有在连续冲突、实在合不上时，才退回「以云端为准」并给出提示。删除标记只保留 30 天，过期后不再随快照上传。
 
 未配置服务端地址时顶部提示「尚未配置服务端地址，当前为只读模式」，点提示条上的「去设置」跳转到设置页。
 
@@ -183,10 +211,11 @@ npm run server:dev       # 开发模式，改动自动重启
 
 **浏览器（缓存 + 本地配置）**：`stores/plan.js` / `stores/plaza.js` 仍通过 `watch` + `localStorage` 落一份副本，只用于首屏快速渲染，每次连接成功后都会被云端数据覆盖：
 
-- `reviewplan:data:v1` — 待办清单、排版计划、高考日期的缓存
+- `reviewplan:data:v1` — 待办清单、排版计划、高考日期与它的修改时间的缓存
 - `reviewplan:plaza:v1` — 日程广场合集的缓存
+- `reviewplan:tombstones:v1` — 删除标记（不持久化的话，「删除后推送失败 → 刷新页面」会丢掉删除记录）
 - `reviewplan:theme` — 主题模式
-- `reviewplan:server:v1` — 服务端地址、访问令牌、最后同步时间与已同步的数据版本号
+- `reviewplan:server:v1` — 服务端地址、访问令牌、最后同步时间、已同步的数据版本号与上次同步用的服务端地址
 
 在「设置 → 数据管理」中：**导出** 取当前（即云端）数据存成 JSON；**导入** 会把文件内容直接覆盖写入云端；**清空** 会同时清掉云端数据。导入 / 清空不做冲突检测，属于强制覆盖。
 
