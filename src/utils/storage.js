@@ -26,11 +26,6 @@ function getStorage() {
   return cached
 }
 
-/** 存储是否可用（不可用时应用退化为「仅内存」模式） */
-export function isStorageAvailable() {
-  return Boolean(getStorage())
-}
-
 export function readText(key, fallback = '') {
   const storage = getStorage()
   if (!storage) return fallback
@@ -76,14 +71,3 @@ export function writeJSON(key, value) {
   }
 }
 
-export function removeItem(key) {
-  const storage = getStorage()
-  if (!storage) return false
-
-  try {
-    storage.removeItem(key)
-    return true
-  } catch {
-    return false
-  }
-}

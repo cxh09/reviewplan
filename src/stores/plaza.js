@@ -5,11 +5,12 @@ import {
   CATEGORY_COLORS,
   COLLECTION_COLORS,
   DEFAULT_ITEM_DURATION,
-  createTemplateCollections,
 } from '@/data/plaza'
+import { ensureWritable } from '@/utils/connection'
 import { createId } from '@/utils/id'
 import { createDebouncedWriter } from '@/utils/persist'
 import { readJSON } from '@/utils/storage'
+import { sanitizeLink } from '@/utils/url'
 
 const STORAGE_KEY = 'reviewplan:plaza:v1'
 
@@ -26,6 +27,7 @@ function normalizeItem(raw) {
     level: raw?.level || '基础',
     duration: Number(raw?.duration) || DEFAULT_ITEM_DURATION,
     desc: raw?.desc || '',
+    link: sanitizeLink(raw?.link),
   }
 }
 
@@ -38,7 +40,6 @@ function normalizeCollection(raw) {
     desc: raw?.desc || '',
     category,
     color: raw?.color || CATEGORY_COLORS[category] || COLLECTION_COLORS[0],
-    builtin: Boolean(raw?.builtin),
     createdAt: raw?.createdAt || Date.now(),
     updatedAt: raw?.updatedAt || Date.now(),
     items: Array.isArray(raw?.items) ? raw.items.map(normalizeItem) : [],
@@ -52,7 +53,7 @@ function normalizeCollection(raw) {
 export const usePlazaStore = defineStore('plaza', () => {
   const persisted = loadPersisted()
 
-  // 默认不预置任何合集，广场从空开始；想要内置模板点页面上的「载入内置模板」
+  // 默认不预置任何合集，广场从空开始
   const collections = ref(
     Array.isArray(persisted.collections) ? persisted.collections.map(normalizeCollection) : [],
   )
@@ -82,6 +83,8 @@ export const usePlazaStore = defineStore('plaza', () => {
   // ---------- 合集 ----------
 
   function addCollection({ name, category = '通用', desc = '', color = '' }) {
+    if (!ensureWritable()) return null
+
     const collection = normalizeCollection({
       id: createId('col'),
       name,
@@ -94,6 +97,8 @@ export const usePlazaStore = defineStore('plaza', () => {
   }
 
   function updateCollection(id, patch) {
+    if (!ensureWritable()) return null
+
     const collection = findCollection(id)
     if (!collection) return null
     Object.assign(collection, {
@@ -110,19 +115,11 @@ export const usePlazaStore = defineStore('plaza', () => {
     collections.value = collections.value.filter((collection) => collection.id !== id)
   }
 
-  /** 补回被删掉的内置合集（已存在的按名称跳过） */
-  function restoreTemplates() {
-    const existing = new Set(collections.value.map((collection) => collection.name))
-    const missing = createTemplateCollections().filter(
-      (collection) => !existing.has(collection.name),
-    )
-    if (missing.length) collections.value.push(...missing)
-    return missing.length
-  }
-
   // ---------- 合集里的日程 ----------
 
-  function addItem(collectionId, { title, category, level, duration, desc }) {
+  function addItem(collectionId, { title, category, level, duration, desc, link }) {
+    if (!ensureWritable()) return null
+
     const collection = findCollection(collectionId)
     if (!collection) return null
     const item = normalizeItem({
@@ -132,6 +129,7 @@ export const usePlazaStore = defineStore('plaza', () => {
       level: level || '基础',
       duration: Number(duration) || DEFAULT_ITEM_DURATION,
       desc: desc || '',
+      link: sanitizeLink(link),
     })
     collection.items.push(item)
     collection.updatedAt = Date.now()
@@ -139,6 +137,8 @@ export const usePlazaStore = defineStore('plaza', () => {
   }
 
   function updateItem(collectionId, itemId, patch) {
+    if (!ensureWritable()) return null
+
     const item = findItem(collectionId, itemId)
     if (!item) return null
     Object.assign(item, {
@@ -146,12 +146,15 @@ export const usePlazaStore = defineStore('plaza', () => {
       category: patch.category || item.category,
       level: patch.level || item.level,
       duration: Number(patch.duration) || item.duration,
-      desc: patch.desc ?? '',
+      desc: patch.desc ?? item.desc,
+      link: patch.link === undefined ? item.link : sanitizeLink(patch.link),
     })
     return item
   }
 
   function removeItem(collectionId, itemId) {
+    if (!ensureWritable()) return
+
     const collection = findCollection(collectionId)
     if (!collection) return
     collection.items = collection.items.filter((item) => item.id !== itemId)
@@ -171,6 +174,7 @@ export const usePlazaStore = defineStore('plaza', () => {
   }
 
   function resetAll() {
+    if (!ensureWritable()) return
     collections.value = []
   }
 
@@ -195,7 +199,6 @@ export const usePlazaStore = defineStore('plaza', () => {
     addCollection,
     updateCollection,
     removeCollection,
-    restoreTemplates,
     addItem,
     updateItem,
     removeItem,

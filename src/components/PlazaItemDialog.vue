@@ -1,12 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { CATEGORY_OPTIONS, DEFAULT_ITEM_DURATION, LEVEL_OPTIONS } from '@/data/plaza'
 
 const props = defineProps({
   /** 编辑时传入日程对象，新建时为 null */
   item: { type: Object, default: null },
-  /** 新建时默认选中的科目 */
-  defaultCategory: { type: String, default: '通用' },
 })
 
 const visible = defineModel('visible', { type: Boolean, default: false })
@@ -15,13 +12,7 @@ const emit = defineEmits(['submit'])
 const formRef = ref(null)
 
 function createForm() {
-  return {
-    title: '',
-    category: props.defaultCategory || '通用',
-    level: '基础',
-    duration: DEFAULT_ITEM_DURATION,
-    desc: '',
-  }
+  return { title: '', link: '' }
 }
 
 const formData = ref(createForm())
@@ -33,32 +24,23 @@ const rules = {
     { required: true, message: '请输入日程标题', type: 'error', trigger: 'blur' },
     { max: 30, message: '标题不要超过 30 个字', type: 'error', trigger: 'blur' },
   ],
+  link: [{ url: true, message: '看起来不是有效的链接', type: 'warning', trigger: 'blur' }],
 }
 
 watch(visible, (value) => {
   if (!value) return
   const source = props.item
-  formData.value = source
-    ? {
-        title: source.title,
-        category: source.category || props.defaultCategory || '通用',
-        level: source.level || '基础',
-        duration: Number(source.duration) || DEFAULT_ITEM_DURATION,
-        desc: source.desc || '',
-      }
-    : createForm()
+  formData.value = source ? { title: source.title, link: source.link || '' } : createForm()
   formRef.value?.clearValidate?.()
 })
 
 async function handleConfirm() {
   const result = await formRef.value?.validate?.()
   if (result !== true) return
+  // 科目、难度、时长不再让用户填：新建时继承合集科目与默认值，编辑时 store 会保留原值
   emit('submit', {
     title: formData.value.title.trim(),
-    category: formData.value.category,
-    level: formData.value.level,
-    duration: Number(formData.value.duration) || DEFAULT_ITEM_DURATION,
-    desc: formData.value.desc.trim(),
+    link: formData.value.link.trim(),
   })
   visible.value = false
 }
@@ -76,40 +58,8 @@ async function handleConfirm() {
         <t-input v-model="formData.title" placeholder="例如：函数与导数专题刷题" clearable />
       </t-form-item>
 
-      <t-form-item label="科目" name="category">
-        <t-select
-          v-model="formData.category"
-          :options="CATEGORY_OPTIONS.map((option) => ({ label: option, value: option }))"
-        />
-      </t-form-item>
-
-      <t-form-item label="难度" name="level">
-        <t-radio-group v-model="formData.level" variant="default-filled">
-          <t-radio-button v-for="level in LEVEL_OPTIONS" :key="level" :value="level">
-            {{ level }}
-          </t-radio-button>
-        </t-radio-group>
-      </t-form-item>
-
-      <t-form-item label="预计时长" name="duration">
-        <t-input-number
-          v-model="formData.duration"
-          theme="normal"
-          :min="5"
-          :max="480"
-          :step="5"
-          suffix="分钟"
-          style="width: 160px"
-        />
-        <span class="item-dialog__tip">只作参考，实际时长在日程表里拖拽决定</span>
-      </t-form-item>
-
-      <t-form-item label="日程描述" name="desc">
-        <t-textarea
-          v-model="formData.desc"
-          placeholder="这条日程具体要做什么、做到什么程度"
-          :autosize="{ minRows: 2, maxRows: 5 }"
-        />
+      <t-form-item label="附件或链接" name="link">
+        <t-input v-model="formData.link" placeholder="粘贴网盘 / 文档链接，选填" clearable />
       </t-form-item>
     </t-form>
 
@@ -119,11 +69,3 @@ async function handleConfirm() {
     </template>
   </t-dialog>
 </template>
-
-<style scoped>
-.item-dialog__tip {
-  margin-left: 12px;
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-}
-</style>

@@ -1,10 +1,12 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
+import { ensureWritable } from '@/utils/connection'
 import { addDays, diffDays, parseDateKey, todayKey, toDateKey } from '@/utils/date'
 import { createId } from '@/utils/id'
 import { createDebouncedWriter } from '@/utils/persist'
 import { readJSON } from '@/utils/storage'
+import { sanitizeLink } from '@/utils/url'
 
 const STORAGE_KEY = 'reviewplan:data:v1'
 
@@ -60,6 +62,7 @@ function normalizeTodo(raw) {
     level: raw?.level || '基础',
     duration: Math.round(clamp(toNumber(raw?.duration, 30), MIN_DURATION, MAX_DURATION)),
     desc: raw?.desc || '',
+    link: sanitizeLink(raw?.link),
     source: raw?.source || 'manual',
     createdAt: toNumber(raw?.createdAt, Date.now()),
   }
@@ -92,9 +95,12 @@ function normalizePlan(raw) {
 export const usePlanStore = defineStore('plan', () => {
   const persisted = loadPersisted()
 
-  const gaokaoDate = ref(persisted.gaokaoDate || DEFAULT_GAOKAO_DATE)
-  const todos = ref(Array.isArray(persisted.todos) ? persisted.todos : [])
-  const plans = ref(Array.isArray(persisted.plans) ? persisted.plans : [])
+  // 缓存里的数据同样走一遍归一化：补齐缺失字段、夹回合法范围、过滤危险的链接协议
+  const gaokaoDate = ref(
+    isValidDateKey(persisted.gaokaoDate) ? persisted.gaokaoDate : DEFAULT_GAOKAO_DATE,
+  )
+  const todos = ref(Array.isArray(persisted.todos) ? persisted.todos.map(normalizeTodo) : [])
+  const plans = ref(Array.isArray(persisted.plans) ? persisted.plans.map(normalizePlan) : [])
 
   // ---------- 派生数据 ----------
 
@@ -143,8 +149,11 @@ export const usePlanStore = defineStore('plan', () => {
     duration = 30,
     level = '基础',
     desc = '',
+    link = '',
     source = 'manual',
   }) {
+    if (!ensureWritable()) return null
+
     const trimmed = `${title || ''}`.trim()
     if (!trimmed) return null
 
@@ -160,6 +169,7 @@ export const usePlanStore = defineStore('plan', () => {
       duration: Number(duration) || 30,
       level,
       desc,
+      link: sanitizeLink(link),
       source,
       createdAt: Date.now(),
     }
@@ -168,6 +178,7 @@ export const usePlanStore = defineStore('plan', () => {
   }
 
   function removeTodo(id) {
+    if (!ensureWritable()) return
     todos.value = todos.value.filter((todo) => todo.id !== id)
   }
 
@@ -192,6 +203,7 @@ export const usePlanStore = defineStore('plan', () => {
     duration = DEFAULT_SLOT_MINUTES,
     level = '基础',
     desc = '',
+    link = '',
     source = 'manual',
     date,
     startHour,
@@ -199,6 +211,8 @@ export const usePlanStore = defineStore('plan', () => {
     todoId = null,
     originDuration = null,
   }) {
+    if (!ensureWritable()) return null
+
     const plan = {
       id: createId('plan'),
       todoId,
@@ -208,6 +222,7 @@ export const usePlanStore = defineStore('plan', () => {
       originDuration,
       level,
       desc,
+      link: sanitizeLink(link),
       source,
       date,
       startHour,
@@ -221,6 +236,8 @@ export const usePlanStore = defineStore('plan', () => {
 
   /** 把待办清单里的条目拖到时间线上：从待办移到计划 */
   function scheduleFromTodo(todoId, date, startHour, duration, note = '') {
+    if (!ensureWritable()) return null
+
     const index = todos.value.findIndex((todo) => todo.id === todoId)
     if (index === -1) return null
 
@@ -239,6 +256,8 @@ export const usePlanStore = defineStore('plan', () => {
 
   /** 把计划退回到待办清单 */
   function unschedulePlan(planId) {
+    if (!ensureWritable()) return
+
     const index = plans.value.findIndex((plan) => plan.id === planId)
     if (index === -1) return
 
@@ -251,12 +270,15 @@ export const usePlanStore = defineStore('plan', () => {
       duration: Number(plan.originDuration) || plan.duration,
       level: plan.level,
       desc: plan.desc,
+      link: plan.link || '',
       source: plan.source || 'manual',
       createdAt: Date.now(),
     })
   }
 
   function movePlan(planId, date, startHour) {
+    if (!ensureWritable()) return
+
     const plan = plans.value.find((item) => item.id === planId)
     if (!plan) return
     plan.date = date
@@ -265,6 +287,8 @@ export const usePlanStore = defineStore('plan', () => {
 
   /** 横向拉伸计划块：调整开始时间 / 时长（时间跨度） */
   function resizePlan(planId, { startHour, duration }) {
+    if (!ensureWritable()) return
+
     const plan = plans.value.find((item) => item.id === planId)
     if (!plan) return
     if (Number.isFinite(startHour)) plan.startHour = startHour
@@ -276,6 +300,8 @@ export const usePlanStore = defineStore('plan', () => {
    * 空标题、非法日期这类值不会覆盖原值，避免计划被改成空后从日历上消失。
    */
   function updatePlan(planId, patch) {
+    if (!ensureWritable()) return null
+
     const plan = plans.value.find((item) => item.id === planId)
     if (!plan) return null
 
@@ -286,6 +312,7 @@ export const usePlanStore = defineStore('plan', () => {
     if (patch.category !== undefined && patch.category) plan.category = patch.category
     if (patch.level !== undefined && patch.level) plan.level = patch.level
     if (patch.desc !== undefined) plan.desc = patch.desc
+    if (patch.link !== undefined) plan.link = sanitizeLink(patch.link)
     if (patch.note !== undefined) plan.note = patch.note
     if (patch.date !== undefined && isValidDateKey(patch.date)) plan.date = patch.date
     if (patch.startHour !== undefined) {
@@ -301,17 +328,20 @@ export const usePlanStore = defineStore('plan', () => {
   }
 
   function togglePlanDone(planId) {
+    if (!ensureWritable()) return
     const plan = plans.value.find((item) => item.id === planId)
     if (plan) plan.done = !plan.done
   }
 
   function removePlan(planId) {
+    if (!ensureWritable()) return
     plans.value = plans.value.filter((plan) => plan.id !== planId)
   }
 
   // ---------- 设置与数据管理 ----------
 
   function setGaokaoDate(date) {
+    if (!ensureWritable()) return
     if (date) gaokaoDate.value = date
   }
 
@@ -348,6 +378,7 @@ export const usePlanStore = defineStore('plan', () => {
   }
 
   function resetAll() {
+    if (!ensureWritable()) return
     todos.value = []
     plans.value = []
     gaokaoDate.value = DEFAULT_GAOKAO_DATE
