@@ -11,7 +11,7 @@ import {
   LinkIcon,
 } from 'tdesign-icons-vue-next'
 
-import { CATEGORY_OPTIONS, categoryColor, levelTheme } from '@/data/plaza'
+import { categoryColor, levelTheme } from '@/data/plaza'
 import { DEFAULT_SLOT_MINUTES, TIMELINE_HOURS, usePlanStore } from '@/stores/plan'
 import { isOnline } from '@/utils/connection'
 import {
@@ -431,13 +431,6 @@ function formatClock(hourValue) {
   return `${`${h}`.padStart(2, '0')}:${`${m}`.padStart(2, '0')}`
 }
 
-const categoryOptions = CATEGORY_OPTIONS.map((item) => ({ label: item, value: item }))
-
-const hourOptions = TIMELINE_HOURS.map((hour) => ({
-  label: `${formatHour(hour)} - ${formatHour((hour + 1) % 24)}`,
-  value: hour,
-}))
-
 function isWeekend(date) {
   const day = parseDateKey(date).getDay()
   return day === 0 || day === 6
@@ -678,62 +671,12 @@ onBeforeUnmount(() => {
   if (autoScrollFrame !== null) cancelAnimationFrame(autoScrollFrame)
 })
 
-// ---------- 添加日程 ----------
+// ---------- 添加日程（仅从待办清单排班） ----------
 
-const addVisible = ref(false)
-const addForm = ref({
-  title: '',
-  category: '通用',
-  duration: 60,
-  date: todayKey(),
-  startHour: 19,
-  note: '',
-  todoId: null,
-})
-
-function openAddDialog(prefill) {
-  addForm.value = {
-    title: '',
-    category: '通用',
-    duration: 60,
-    date: todayKey(),
-    startHour: 19,
-    note: '',
-    todoId: null,
-    ...(prefill || {}),
-  }
-  addVisible.value = true
-}
-
-async function confirmAdd() {
-  const title = `${addForm.value.title || ''}`.trim()
-  if (!title) {
-    MessagePlugin.warning('请先填写日程名称')
-    return
-  }
-
-  const targetDate = addForm.value.date
-
-  const created = addForm.value.todoId
-    ? planStore.scheduleFromTodo(
-        addForm.value.todoId,
-        targetDate,
-        addForm.value.startHour,
-        addForm.value.duration,
-        addForm.value.note,
-      )
-    : planStore.addPlan({
-        title,
-        category: addForm.value.category,
-        duration: addForm.value.duration,
-        date: targetDate,
-        startHour: addForm.value.startHour,
-        note: addForm.value.note,
-      })
-
-  addVisible.value = false
-
-  // 只读模式下 store 会拒绝写入并给出提示，这里不再滚动也不再报「已添加」
+/** 待办一键排班：直接排到今天 19:00，之后可在详情里改时间 */
+async function quickSchedule(todo) {
+  const targetDate = todayKey()
+  const created = planStore.scheduleFromTodo(todo.id, targetDate, 19)
   if (!created) return
 
   // 目标日期可能还没被渲染出来，补齐后滚动过去，保证能看到结果
@@ -1120,14 +1063,7 @@ watch(
                   <span
                     class="todo-chip__action"
                     title="直接排班"
-                    @click.stop="
-                      openAddDialog({
-                        title: todo.title,
-                        category: todo.category,
-                        duration: todo.duration,
-                        todoId: todo.id,
-                      })
-                    "
+                    @click.stop="quickSchedule(todo)"
                   >
                     <CalendarIcon />
                   </span>
@@ -1145,56 +1081,6 @@ watch(
         </div>
       </div>
     </div>
-
-    <!-- 添加日程 -->
-    <t-dialog
-      v-model:visible="addVisible"
-      header="添加日程"
-      width="520px"
-      :confirm-btn="{ content: '加入排版计划' }"
-      @confirm="confirmAdd"
-    >
-      <div class="form-item">
-        <label class="form-label">日程名称</label>
-        <t-input v-model="addForm.title" placeholder="例如：数学导数专题突破" clearable />
-      </div>
-
-      <div class="form-row">
-        <div class="form-item">
-          <label class="form-label">科目</label>
-          <t-select v-model="addForm.category" :options="categoryOptions" />
-        </div>
-        <div class="form-item">
-          <label class="form-label">时长（分钟）</label>
-          <t-input-number v-model="addForm.duration" :min="5" :max="600" :step="5" />
-        </div>
-      </div>
-
-      <div class="form-row">
-        <div class="form-item">
-          <label class="form-label">日期</label>
-          <t-date-picker
-            v-model="addForm.date"
-            value-type="YYYY-MM-DD"
-            format="YYYY-MM-DD"
-            style="width: 100%"
-          />
-        </div>
-        <div class="form-item">
-          <label class="form-label">开始时间</label>
-          <t-select v-model="addForm.startHour" :options="hourOptions" />
-        </div>
-      </div>
-
-      <div class="form-item">
-        <label class="form-label">备注</label>
-        <t-textarea
-          v-model="addForm.note"
-          placeholder="选填，例如：重点复盘第 3 题"
-          :autosize="{ minRows: 2, maxRows: 4 }"
-        />
-      </div>
-    </t-dialog>
   </div>
 </template>
 
