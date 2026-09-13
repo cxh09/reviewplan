@@ -16,12 +16,21 @@ function main() {
     )
   })
 
+  let shuttingDown = false
+
   function shutdown(signal) {
+    if (shuttingDown) return
+    shuttingDown = true
     console.log(`\n[reviewplan-server] 收到 ${signal}，正在退出…`)
+
     server.close(() => {
       db.close()
       process.exit(0)
     })
+    // 主动断开 keep-alive 连接：否则要等连接超时，systemctl restart 会多等好几秒
+    server.closeAllConnections?.()
+    // 兜底：3 秒还没退干净就强制退出
+    setTimeout(() => process.exit(0), 3000).unref?.()
   }
 
   process.on('SIGINT', () => shutdown('SIGINT'))

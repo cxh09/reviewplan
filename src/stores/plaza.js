@@ -10,6 +10,7 @@ import { ensureWritable } from '@/utils/connection'
 import { createId } from '@/utils/id'
 import { createDebouncedWriter } from '@/utils/persist'
 import { readJSON } from '@/utils/storage'
+import { markDeleted, markDeletedMany } from '@/utils/tombstone'
 import { sanitizeLink } from '@/utils/url'
 
 const STORAGE_KEY = 'reviewplan:plaza:v1'
@@ -28,6 +29,8 @@ function normalizeItem(raw) {
     duration: Number(raw?.duration) || DEFAULT_ITEM_DURATION,
     desc: raw?.desc || '',
     link: sanitizeLink(raw?.link),
+    // 0 表示历史数据（没有时间戳），合并时视为最旧
+    updatedAt: Number(raw?.updatedAt) || 0,
   }
 }
 
@@ -41,7 +44,8 @@ function normalizeCollection(raw) {
     category,
     color: raw?.color || CATEGORY_COLORS[category] || COLLECTION_COLORS[0],
     createdAt: raw?.createdAt || Date.now(),
-    updatedAt: raw?.updatedAt || Date.now(),
+    // 0 表示历史数据（没有时间戳），合并时视为最旧
+    updatedAt: Number(raw?.updatedAt) || 0,
     items: Array.isArray(raw?.items) ? raw.items.map(normalizeItem) : [],
   }
 }
@@ -91,6 +95,7 @@ export const usePlazaStore = defineStore('plaza', () => {
       category,
       desc,
       color: color || CATEGORY_COLORS[category] || COLLECTION_COLORS[0],
+      updatedAt: Date.now(),
     })
     collections.value.push(collection)
     return collection
@@ -112,6 +117,8 @@ export const usePlazaStore = defineStore('plaza', () => {
   }
 
   function removeCollection(id) {
+    if (!ensureWritable()) return
+    markDeleted(id)
     collections.value = collections.value.filter((collection) => collection.id !== id)
   }
 
@@ -130,6 +137,7 @@ export const usePlazaStore = defineStore('plaza', () => {
       duration: Number(duration) || DEFAULT_ITEM_DURATION,
       desc: desc || '',
       link: sanitizeLink(link),
+      updatedAt: Date.now(),
     })
     collection.items.push(item)
     collection.updatedAt = Date.now()
@@ -148,6 +156,7 @@ export const usePlazaStore = defineStore('plaza', () => {
       duration: Number(patch.duration) || item.duration,
       desc: patch.desc ?? item.desc,
       link: patch.link === undefined ? item.link : sanitizeLink(patch.link),
+      updatedAt: Date.now(),
     })
     return item
   }
@@ -157,6 +166,7 @@ export const usePlazaStore = defineStore('plaza', () => {
 
     const collection = findCollection(collectionId)
     if (!collection) return
+    markDeleted(itemId)
     collection.items = collection.items.filter((item) => item.id !== itemId)
     collection.updatedAt = Date.now()
   }
@@ -175,6 +185,13 @@ export const usePlazaStore = defineStore('plaza', () => {
 
   function resetAll() {
     if (!ensureWritable()) return
+    // 清空也是一次删除：不记标记的话，另一端残留的副本会把合集带回来
+    markDeletedMany(
+      collections.value.flatMap((collection) => [
+        collection.id,
+        ...collection.items.map((item) => item.id),
+      ]),
+    )
     collections.value = []
   }
 

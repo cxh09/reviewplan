@@ -266,47 +266,90 @@ function plansAt(date, hour) {
 }
 
 /**
- * 每一天的计划块布局：横向按时间轴百分比定位（宽度＝时长），
+ * 单日的计划块布局：横向按时间轴百分比定位（宽度＝时长），
  * 同一时间段重叠的计划上下分层，避免互相遮挡。
+ */
+function layoutDay(rawItems) {
+  const items = rawItems
+    .map((plan) => {
+      const start = Math.min(
+        Math.max(Number(plan.startHour) || FIRST_HOUR, FIRST_HOUR),
+        END_HOUR - SNAP_MINUTES / 60,
+      )
+      const hours = Math.max(Number(plan.duration) || 60, SNAP_MINUTES) / 60
+      const end = Math.min(start + hours, END_HOUR)
+      return { plan, start, end }
+    })
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+
+  const laneEnds = []
+  items.forEach((item) => {
+    let lane = laneEnds.findIndex((end) => end <= item.start)
+    if (lane === -1) {
+      lane = laneEnds.length
+      laneEnds.push(0)
+    }
+    laneEnds[lane] = item.end
+    item.lane = lane
+  })
+
+  return {
+    lanes: Math.max(laneEnds.length, 1),
+    blocks: items.map((item) => ({
+      plan: item.plan,
+      lane: item.lane,
+      start: item.start,
+      end: item.end,
+      left: ((item.start - FIRST_HOUR) / HOURS_COUNT) * 100,
+      width: ((item.end - item.start) / HOURS_COUNT) * 100,
+    })),
+  }
+}
+
+/** 每天的分层布局缓存：date -> { signature, lanes, blocks } */
+const layoutCache = new Map()
+
+/**
+ * 布局签名。只包含真正影响布局的字段：
+ * 标题、科目等其余字段通过 blocks 里的 plan 对象引用自然同步，不需要进签名。
+ */
+function layoutSignature(items) {
+  if (!items.length) return ''
+  return items
+    .map((plan) => `${plan.id}:${plan.startHour}:${plan.duration}`)
+    .sort()
+    .join('|')
+}
+
+/**
+ * 每一天的计划块布局。
+ *
+ * 行高依赖每天的分层数，所以必须覆盖全部日期；但拖拽 / 拉伸是按帧改数据的，
+ * 每帧把几百天的布局全部重算太浪费。这里按签名做缓存，
+ * 每次只有真正变化的那一两天会重新计算，其余直接复用上次的结果。
  */
 const dayLayouts = computed(() => {
   const map = new Map()
+  const alive = new Set(days.value)
 
   days.value.forEach((date) => {
-    const items = (plansByDate.value.get(date) || [])
-      .map((plan) => {
-        const start = Math.min(
-          Math.max(Number(plan.startHour) || FIRST_HOUR, FIRST_HOUR),
-          END_HOUR - SNAP_MINUTES / 60,
-        )
-        const hours = Math.max(Number(plan.duration) || 60, SNAP_MINUTES) / 60
-        const end = Math.min(start + hours, END_HOUR)
-        return { plan, start, end }
-      })
-      .sort((a, b) => a.start - b.start || a.end - b.end)
+    const items = plansByDate.value.get(date) || []
+    const signature = layoutSignature(items)
+    const cached = layoutCache.get(date)
 
-    const laneEnds = []
-    items.forEach((item) => {
-      let lane = laneEnds.findIndex((end) => end <= item.start)
-      if (lane === -1) {
-        lane = laneEnds.length
-        laneEnds.push(0)
-      }
-      laneEnds[lane] = item.end
-      item.lane = lane
-    })
+    if (cached && cached.signature === signature) {
+      map.set(date, cached)
+      return
+    }
 
-    map.set(date, {
-      lanes: Math.max(laneEnds.length, 1),
-      blocks: items.map((item) => ({
-        plan: item.plan,
-        lane: item.lane,
-        start: item.start,
-        end: item.end,
-        left: ((item.start - FIRST_HOUR) / HOURS_COUNT) * 100,
-        width: ((item.end - item.start) / HOURS_COUNT) * 100,
-      })),
-    })
+    const entry = { signature, ...layoutDay(items) }
+    layoutCache.set(date, entry)
+    map.set(date, entry)
+  })
+
+  // 清掉已经离开渲染范围的日期，避免缓存无限增长
+  layoutCache.forEach((_, date) => {
+    if (!alive.has(date)) layoutCache.delete(date)
   })
 
   return map
@@ -728,12 +771,16 @@ function createDetailForm(plan) {
   }
 }
 
+/** 重建副本时置位，跳过随之而来的那次提交（否则光是打开详情就会写一次） */
+let skipNextDetailSubmit = false
+
 // 打开抽屉或切换目标计划时重建副本
 watch(
   [detailVisible, detailId],
   () => {
     detailForm.value =
       detailVisible.value && detailPlan.value ? createDetailForm(detailPlan.value) : null
+    skipNextDetailSubmit = true
   },
   { immediate: true },
 )
@@ -742,6 +789,10 @@ watch(
 watch(
   detailForm,
   (form) => {
+    if (skipNextDetailSubmit) {
+      skipNextDetailSubmit = false
+      return
+    }
     if (!form || !detailId.value) return
     planStore.updatePlan(detailId.value, form)
   },

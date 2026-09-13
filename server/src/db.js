@@ -64,15 +64,29 @@ export function createRepository(db) {
    * @returns {{ conflict: true, current: object } | { conflict: false, rev: number, updatedAt: string }}
    */
   function writeSnapshot(data, expectedRev) {
-    const current = readSnapshot()
-    if (expectedRev !== null && expectedRev !== current.rev) {
-      return { conflict: true, current }
-    }
+    // 「读 rev → 写 rev」必须原子：否则多进程 / 多实例共享同一个库文件时，
+    // 两个请求可能同时通过校验，后写的那个会把先写的覆盖掉。
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const current = readSnapshot()
+      if (expectedRev !== null && expectedRev !== current.rev) {
+        db.exec('ROLLBACK')
+        return { conflict: true, current }
+      }
 
-    const rev = current.rev + 1
-    const updatedAt = new Date().toISOString()
-    upsertStmt.run(ROW_ID, JSON.stringify(data), rev, SCHEMA_VERSION, updatedAt)
-    return { conflict: false, rev, updatedAt }
+      const rev = current.rev + 1
+      const updatedAt = new Date().toISOString()
+      upsertStmt.run(ROW_ID, JSON.stringify(data), rev, SCHEMA_VERSION, updatedAt)
+      db.exec('COMMIT')
+      return { conflict: false, rev, updatedAt }
+    } catch (error) {
+      try {
+        db.exec('ROLLBACK')
+      } catch {
+        // 事务可能已经结束，忽略回滚失败
+      }
+      throw error
+    }
   }
 
   return { readSnapshot, writeSnapshot }
