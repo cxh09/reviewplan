@@ -9,18 +9,18 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
-  CloudDownloadIcon,
   DeleteIcon,
   EditIcon,
+  LinkIcon,
   SearchIcon,
   StarIcon,
 } from 'tdesign-icons-vue-next'
 
 import CollectionDialog from '@/components/CollectionDialog.vue'
 import PlazaItemDialog from '@/components/PlazaItemDialog.vue'
-import { levelTheme } from '@/data/plaza'
 import { usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
+import { isOnline } from '@/utils/connection'
 
 const router = useRouter()
 const planStore = usePlanStore()
@@ -109,11 +109,13 @@ function openEditCollection(collection) {
 function submitCollection(payload) {
   const editing = editingCollection.value
   if (editing) {
-    plazaStore.updateCollection(editing.id, payload)
+    // 只读模式下 store 会拒绝写入并给出提示，这里不再报「已更新」
+    if (!plazaStore.updateCollection(editing.id, payload)) return
     MessagePlugin.success('合集已更新')
     return
   }
   const collection = plazaStore.addCollection(payload)
+  if (!collection) return
   MessagePlugin.success(`合集「${collection.name}」已创建`)
 }
 
@@ -126,8 +128,8 @@ function confirmRemoveCollection(collection) {
     cancelBtn: '再想想',
     onConfirm: () => {
       plazaStore.removeCollection(collection.id)
-      MessagePlugin.success(`合集「${collection.name}」已删除`)
       dialog.hide()
+      if (isOnline.value) MessagePlugin.success(`合集「${collection.name}」已删除`)
     },
   })
 }
@@ -153,11 +155,11 @@ function openEditItem(collectionId, item) {
 function submitItem(payload) {
   const editing = editingItem.value
   if (editing) {
-    plazaStore.updateItem(itemCollectionId.value, editing.id, payload)
+    if (!plazaStore.updateItem(itemCollectionId.value, editing.id, payload)) return
     MessagePlugin.success('日程已更新')
     return
   }
-  plazaStore.addItem(itemCollectionId.value, payload)
+  if (!plazaStore.addItem(itemCollectionId.value, payload)) return
   // 新加的日程在末尾，展开合集免得看起来「没加上」
   if (!expandedIds.value.has(itemCollectionId.value)) {
     expandedIds.value = new Set(expandedIds.value).add(itemCollectionId.value)
@@ -174,8 +176,8 @@ function confirmRemoveItem(collection, item) {
     cancelBtn: '取消',
     onConfirm: () => {
       plazaStore.removeItem(collection.id, item.id)
-      MessagePlugin.success('日程已删除')
       dialog.hide()
+      if (isOnline.value) MessagePlugin.success('日程已删除')
     },
   })
 }
@@ -190,15 +192,17 @@ function isInTodo(item) {
 /** @returns {boolean} 是否真的新增了一条 */
 function addItemSilently(item) {
   const existed = isInTodo(item)
-  planStore.addTodo({
+  const todo = planStore.addTodo({
     title: item.title,
     category: item.category,
     level: item.level,
     duration: item.duration,
     desc: item.desc,
+    link: item.link,
     source: 'plaza',
   })
-  return !existed
+  // 只读模式下 addTodo 返回 null，此时 store 已经弹过提示
+  return Boolean(todo) && !existed
 }
 
 function addItemToTodo(item) {
@@ -218,17 +222,6 @@ function addCollectionToTodo(collection) {
   // 批量加入只弹一条汇总，避免每条各弹一次刷屏
   const added = pending.filter(addItemSilently).length
   MessagePlugin.success(`已加入 ${added} 条日程到待办清单`)
-}
-
-// ---------- 内置模板 ----------
-
-function restoreTemplates() {
-  const count = plazaStore.restoreTemplates()
-  if (!count) {
-    MessagePlugin.info('内置系列合集都已经在广场里了')
-    return
-  }
-  MessagePlugin.success(`已载入 ${count} 个内置系列合集`)
 }
 
 // ---------- 展示辅助 ----------
@@ -256,10 +249,6 @@ function goSchedule() {
           <t-button theme="primary" @click="openCreateCollection">
             <template #icon><AddIcon /></template>
             新建合集
-          </t-button>
-          <t-button theme="default" variant="outline" @click="restoreTemplates">
-            <template #icon><CloudDownloadIcon /></template>
-            载入内置模板
           </t-button>
           <t-button theme="default" variant="outline" @click="goSchedule">
             去日程表排班
@@ -296,12 +285,7 @@ function goSchedule() {
       "
     >
       <template #action>
-        <t-space size="12">
-          <t-button theme="primary" @click="openCreateCollection">新建合集</t-button>
-          <t-button theme="default" variant="outline" @click="restoreTemplates">
-            载入内置模板
-          </t-button>
-        </t-space>
+        <t-button theme="primary" @click="openCreateCollection">新建合集</t-button>
       </template>
     </t-empty>
 
@@ -313,7 +297,6 @@ function goSchedule() {
           <t-tag size="small" variant="light" :style="{ color: collectionColor(collection) }">
             {{ collection.category }}
           </t-tag>
-          <t-tag v-if="collection.builtin" size="small" variant="outline">内置</t-tag>
           <span class="col__count">{{ collection.items.length }} 条日程</span>
 
           <div class="col__ops">
@@ -363,13 +346,19 @@ function goSchedule() {
             <div class="row__main">
               <div class="row__title-row">
                 <span class="row__title">{{ item.title }}</span>
-                <t-tag size="small" variant="light" :theme="levelTheme(item.level)">
-                  {{ item.level }}
-                </t-tag>
-                <t-tag size="small" variant="outline">{{ item.category }}</t-tag>
-                <span class="row__duration">{{ item.duration }} 分钟</span>
               </div>
               <p v-if="item.desc" class="row__desc">{{ item.desc }}</p>
+              <a
+                v-if="item.link"
+                class="row__link"
+                :href="item.link"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click.stop
+              >
+                <LinkIcon />
+                {{ item.link }}
+              </a>
             </div>
 
             <div class="row__ops">
@@ -434,7 +423,6 @@ function goSchedule() {
     <PlazaItemDialog
       v-model:visible="itemDialogVisible"
       :item="editingItem"
-      :default-category="editingItem?.category || '通用'"
       @submit="submitItem"
     />
   </div>
@@ -606,16 +594,27 @@ function goSchedule() {
   font-weight: 600;
 }
 
-.row__duration {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-}
-
 .row__desc {
   margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.7;
   color: var(--td-text-color-secondary);
+}
+
+.row__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--td-brand-color);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.row__link:hover {
+  text-decoration: underline;
 }
 
 .row__ops {

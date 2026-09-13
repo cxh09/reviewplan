@@ -18,6 +18,9 @@ function createForm() {
 
 const formData = ref(createForm())
 
+/** 上一次「跟随科目」得到的颜色：用户手动选过色后就不再自动跟随 */
+const autoColor = ref(COLLECTION_COLORS[0])
+
 const isEdit = computed(() => Boolean(props.collection))
 
 const rules = {
@@ -38,12 +41,15 @@ watch(visible, (value) => {
         desc: source.desc,
       }
     : createForm()
+  autoColor.value = CATEGORY_COLORS[formData.value.category] || COLLECTION_COLORS[0]
   formRef.value?.clearValidate?.()
 })
 
 function handleCategoryChange(category) {
-  // 没手动改过颜色时跟随科目的主题色
-  formData.value.color = CATEGORY_COLORS[category] || COLLECTION_COLORS[0]
+  const next = CATEGORY_COLORS[category] || COLLECTION_COLORS[0]
+  // 没手动改过颜色时才跟随科目的主题色
+  if (formData.value.color === autoColor.value) formData.value.color = next
+  autoColor.value = next
 }
 
 async function handleConfirm() {

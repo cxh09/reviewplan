@@ -5,7 +5,14 @@ import pluginVue from 'eslint-plugin-vue'
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'public/**', 'dev.log'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'server/node_modules/**',
+      'server/data/**',
+      'public/**',
+      'dev.log',
+    ],
   },
   js.configs.recommended,
   ...pluginVue.configs['flat/recommended'],
@@ -26,6 +33,15 @@ export default [
   {
     files: ['vite.config.js', 'eslint.config.js'],
     languageOptions: {
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+  },
+  {
+    // 服务端跑在 Node 环境
+    files: ['server/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 'latest',
       sourceType: 'module',
       globals: { ...globals.node },
     },

@@ -1,20 +1,28 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { DialogPlugin } from 'tdesign-vue-next/es/dialog'
 import { MessagePlugin } from 'tdesign-vue-next/es/message'
-import { DownloadIcon, RefreshIcon, UploadIcon } from 'tdesign-icons-vue-next'
+import {
+  CloudDownloadIcon,
+  DownloadIcon,
+  LinkIcon,
+  RefreshIcon,
+  UploadIcon,
+} from 'tdesign-icons-vue-next'
 
 import pkg from '../../package.json'
 
 import { useAppStore } from '@/stores/app'
 import { DEFAULT_GAOKAO_DATE, usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
+import { useSyncStore } from '@/stores/sync'
 import { formatCN, todayKey, weekdayCN } from '@/utils/date'
 
 const appStore = useAppStore()
 const appVersion = pkg.version
 const planStore = usePlanStore()
 const plazaStore = usePlazaStore()
+const syncStore = useSyncStore()
 
 const gaokaoModel = computed({
   get: () => planStore.gaokaoDate,
@@ -35,7 +43,137 @@ const daysText = computed(() => {
 
 function restoreDefaultDate() {
   planStore.setGaokaoDate(DEFAULT_GAOKAO_DATE)
-  MessagePlugin.success('已恢复默认高考日期')
+  if (syncStore.isOnline) MessagePlugin.success('已恢复默认高考日期')
+}
+
+// ---------- 服务端同步 ----------
+
+const serverUrlInput = ref(syncStore.serverUrl)
+const accessTokenInput = ref(syncStore.accessToken)
+/** 当前进行中的操作：test | reconnect | overwrite，用于按钮 loading */
+const action = ref('')
+
+watch(
+  () => syncStore.serverUrl,
+  (value) => {
+    serverUrlInput.value = value
+  },
+)
+
+/** 把输入框里的地址 / 令牌落到 store（内容没变时 store 内部会跳过） */
+function applyInputs() {
+  syncStore.setServerUrl(serverUrlInput.value)
+  syncStore.setAccessToken(accessTokenInput.value)
+}
+
+const CONNECTION_LABELS = {
+  online: '已连接',
+  connecting: '连接中',
+  offline: '连接失败',
+  unconfigured: '未配置',
+}
+
+const connectionLabel = computed(() => CONNECTION_LABELS[syncStore.connectionState] || '未知')
+
+const connectionTheme = computed(() => {
+  if (syncStore.connectionState === 'online') return 'success'
+  if (syncStore.connectionState === 'connecting') return 'primary'
+  if (syncStore.connectionState === 'unconfigured') return 'warning'
+  return 'danger'
+})
+
+function pad2(value) {
+  return `${value}`.padStart(2, '0')
+}
+
+const lastSyncText = computed(() => {
+  if (!syncStore.lastSyncAt) return '尚未同步'
+  const d = new Date(syncStore.lastSyncAt)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+})
+
+function saveServerConfig() {
+  applyInputs()
+  MessagePlugin.success(
+    syncStore.configured ? '已保存配置，正在连接服务端…' : '已清除服务端地址，应用进入只读模式',
+  )
+}
+
+async function testConnection() {
+  applyInputs()
+  if (!syncStore.configured) {
+    MessagePlugin.warning('请先填写服务端地址')
+    return
+  }
+
+  action.value = 'test'
+  const result = await syncStore.testConnection()
+  action.value = ''
+  if (result.ok) {
+    MessagePlugin.success(
+      `连接成功 · 服务端 v${result.version}${result.auth ? ' · 已开启令牌校验' : ''}`,
+    )
+  } else {
+    MessagePlugin.error(result.unauthorized ? '访问令牌不正确' : `连接失败：${result.error}`)
+  }
+}
+
+/** 重新连接并按云端数据覆盖本地（也会被断线重试复用） */
+async function reconnect() {
+  applyInputs()
+  if (!syncStore.configured) {
+    MessagePlugin.warning('请先填写服务端地址')
+    return
+  }
+
+  action.value = 'reconnect'
+  const result = await syncStore.connect()
+  action.value = ''
+  if (result.ok) {
+    MessagePlugin.success('已同步为云端最新数据')
+  } else if (result.queued) {
+    // 上一次连接还没结束，已经排队重连，不再报错
+    MessagePlugin.info('正在连接中，稍后会自动重试')
+  } else if (!result.stale) {
+    MessagePlugin.error(result.unauthorized ? '访问令牌不正确' : `连接失败：${result.error}`)
+  }
+}
+
+function refreshFromCloud() {
+  applyInputs()
+  if (!syncStore.configured) {
+    MessagePlugin.warning('请先填写服务端地址')
+    return
+  }
+
+  const dialog = DialogPlugin.confirm({
+    header: '从云端刷新',
+    body: '会丢弃本地缓存，用云端的待办清单、排版计划、高考日期与广场合集重新覆盖。确认继续？',
+    theme: 'warning',
+    confirmBtn: { content: '确认刷新' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      dialog.hide()
+      await reconnect()
+    },
+  })
+}
+
+function clearServerConfig() {
+  const dialog = DialogPlugin.confirm({
+    header: '清除服务端配置',
+    body: '只会清除本机保存的服务端地址与访问令牌，云端数据不会被删除。清除后应用进入只读模式。',
+    theme: 'warning',
+    confirmBtn: { content: '清除' },
+    cancelBtn: '取消',
+    onConfirm: () => {
+      syncStore.resetConfig()
+      serverUrlInput.value = ''
+      accessTokenInput.value = ''
+      MessagePlugin.success('已清除服务端配置')
+      dialog.hide()
+    },
+  })
 }
 
 // ---------- 数据导出 / 导入 / 清空 ----------
@@ -62,6 +200,10 @@ function exportJson() {
 }
 
 function triggerImport() {
+  if (!syncStore.isOnline) {
+    MessagePlugin.warning('未连接服务端，导入需要在线才能写回云端')
+    return
+  }
   fileInput.value?.click()
 }
 
@@ -72,9 +214,15 @@ async function handleFileChange(event) {
   try {
     const text = await file.text()
     const data = JSON.parse(text)
+    // 先落到本地视图，再整体覆盖云端
     planStore.importData(data)
     plazaStore.importData(data.collections)
-    MessagePlugin.success('数据导入成功')
+
+    action.value = 'overwrite'
+    const result = await syncStore.overwriteCloud()
+    action.value = ''
+    if (result.ok) MessagePlugin.success('数据导入成功，并已写入云端')
+    else MessagePlugin.error(`导入的数据没能写入云端：${result.error || '请稍后重试'}`)
   } catch (error) {
     MessagePlugin.error(`导入失败：${error.message}`)
   } finally {
@@ -85,15 +233,24 @@ async function handleFileChange(event) {
 function confirmReset() {
   const dialog = DialogPlugin.confirm({
     header: '确认清空所有数据',
-    body: '将删除全部待办清单、排版计划与日程广场的系列合集，并把高考日期恢复为默认值。该操作不可撤销，建议先导出备份。',
+    body: '会同时清空云端与本地的待办清单、排版计划、日程广场合集，并把高考日期恢复为默认值。该操作不可撤销，建议先导出备份。',
     theme: 'warning',
     confirmBtn: { content: '确认清空', theme: 'danger' },
     cancelBtn: '再想想',
-    onConfirm: () => {
+    onConfirm: async () => {
+      dialog.hide()
+      if (!syncStore.isOnline) {
+        MessagePlugin.warning('未连接服务端，暂时无法清空')
+        return
+      }
+
       planStore.resetAll()
       plazaStore.resetAll()
-      MessagePlugin.success('数据已清空')
-      dialog.hide()
+      action.value = 'overwrite'
+      const result = await syncStore.overwriteCloud()
+      action.value = ''
+      if (result.ok) MessagePlugin.success('本地与云端数据已清空')
+      else MessagePlugin.error(`清空失败：${result.error || '请稍后重试'}`)
     },
   })
 }
@@ -154,6 +311,93 @@ function confirmReset() {
 
     <t-card :bordered="false" class="settings__card">
       <template #title>
+        <span class="settings__title">服务端同步</span>
+      </template>
+
+      <t-alert
+        v-if="!syncStore.configured"
+        class="settings__alert"
+        theme="warning"
+        message="还没有配置服务端地址。应用采用全在线模式：数据以云端为准，必须连上服务端才能编辑，未配置时只能查看本地缓存。"
+      />
+
+      <div class="settings__row">
+        <div class="settings__label">
+          <span class="settings__label-main">服务端地址</span>
+          <span class="settings__label-tip">
+            例如 http://localhost:3000 或 http://192.168.1.10:3000
+          </span>
+        </div>
+        <div class="settings__control settings__control--wide">
+          <t-input
+            v-model="serverUrlInput"
+            class="settings__input"
+            placeholder="http://localhost:3000"
+            clearable
+            @blur="applyInputs"
+          />
+        </div>
+      </div>
+
+      <div class="settings__row">
+        <div class="settings__label">
+          <span class="settings__label-main">访问令牌</span>
+          <span class="settings__label-tip">需要手动填写，与服务端 ACCESS_TOKEN 保持一致</span>
+        </div>
+        <div class="settings__control settings__control--wide">
+          <t-input
+            v-model="accessTokenInput"
+            class="settings__input"
+            type="password"
+            placeholder="可选"
+            @blur="applyInputs"
+          />
+        </div>
+      </div>
+
+      <div class="settings__sync-status">
+        <t-tag :theme="connectionTheme" variant="light">{{ connectionLabel }}</t-tag>
+        <span class="settings__sync-text">{{ syncStore.message || '等待操作' }}</span>
+        <span class="settings__sync-text">最后同步：{{ lastSyncText }}</span>
+        <span class="settings__sync-text">数据版本：{{ syncStore.rev }}</span>
+      </div>
+
+      <div class="settings__actions">
+        <t-button theme="primary" :disabled="!syncStore.configured" @click="saveServerConfig">
+          保存配置
+        </t-button>
+        <t-button
+          theme="success"
+          variant="outline"
+          :loading="action === 'test'"
+          :disabled="!syncStore.configured || action !== ''"
+          @click="testConnection"
+        >
+          <template #icon><LinkIcon /></template>
+          测试连接
+        </t-button>
+        <t-button
+          theme="default"
+          variant="outline"
+          :loading="action === 'reconnect'"
+          :disabled="!syncStore.configured || action !== ''"
+          @click="refreshFromCloud"
+        >
+          <template #icon><CloudDownloadIcon /></template>
+          从云端刷新
+        </t-button>
+        <t-button theme="danger" variant="text" :disabled="action !== ''" @click="clearServerConfig">
+          清除配置
+        </t-button>
+      </div>
+
+      <p class="settings__note">
+        全在线模式：待办清单、排版计划、高考日期与日程广场合集都以服务端为准，任何改动都会立即上传；连不上服务端时进入只读并每 3 秒自动重试；多端同时改动时以云端为准，本地这次改动会被丢弃。浏览器里只保留一份用于首屏快速渲染的缓存。
+      </p>
+    </t-card>
+
+    <t-card :bordered="false" class="settings__card">
+      <template #title>
         <span class="settings__title">数据管理</span>
       </template>
 
@@ -207,7 +451,7 @@ function confirmReset() {
       </div>
 
       <p class="settings__note">
-        数据保存在浏览器的 localStorage 中，换设备或清理浏览器数据前请先导出备份。
+        导出的就是当前云端数据，可作为额外备份；导入会把文件内容直接覆盖写入云端；清空会同时清掉云端数据。日常使用时数据始终由服务端保存，浏览器中的副本仅用于首屏渲染。
       </p>
     </t-card>
 
@@ -268,6 +512,37 @@ function confirmReset() {
 
 .settings__picker {
   width: 180px;
+}
+
+.settings__alert {
+  margin-bottom: 16px;
+}
+
+.settings__control--wide {
+  flex: 1;
+  min-width: 220px;
+  justify-content: flex-end;
+}
+
+.settings__input {
+  width: 320px;
+  max-width: 100%;
+}
+
+.settings__sync-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+  padding: 12px 16px;
+  border-radius: var(--td-radius-medium);
+  background-color: var(--td-bg-color-secondarycontainer);
+}
+
+.settings__sync-text {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .settings__preview {

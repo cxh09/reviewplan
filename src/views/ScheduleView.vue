@@ -8,11 +8,12 @@ import {
   CloseIcon,
   DeleteIcon,
   DragMoveIcon,
-  QueueIcon,
+  LinkIcon,
 } from 'tdesign-icons-vue-next'
 
 import { CATEGORY_OPTIONS, categoryColor, levelTheme } from '@/data/plaza'
 import { DEFAULT_SLOT_MINUTES, TIMELINE_HOURS, usePlanStore } from '@/stores/plan'
+import { isOnline } from '@/utils/connection'
 import {
   addDays,
   dateRange,
@@ -394,12 +395,6 @@ const hourOptions = TIMELINE_HOURS.map((hour) => ({
   value: hour,
 }))
 
-/** 开始时间：15 分钟一档，和拖边缘的吸附粒度保持一致 */
-const startOptions = Array.from({ length: HOURS_COUNT * 4 }, (_, index) => {
-  const value = FIRST_HOUR + index * SNAP_HOURS
-  return { label: formatClock(value), value }
-})
-
 function isWeekend(date) {
   const day = parseDateKey(date).getDay()
   return day === 0 || day === 6
@@ -474,8 +469,8 @@ function resolveDropTarget(x, y) {
     const startHour = clamp(hour + offsetMinutes / 60, FIRST_HOUR, END_HOUR - SNAP_HOURS)
     return { type: 'cell', date: cell.dataset.date, hour, startHour }
   }
-  // 认整个 dock 而不是展开后的面板：待办收起时也要能把计划拖回来
-  if (el?.closest?.('.todo-dock')) return { type: 'pool' }
+  // 展开的待办面板整体都是合法落点
+  if (el?.closest?.('.todo-panel')) return { type: 'pool' }
   return null
 }
 
@@ -676,26 +671,27 @@ async function confirmAdd() {
 
   const targetDate = addForm.value.date
 
-  if (addForm.value.todoId) {
-    planStore.scheduleFromTodo(
-      addForm.value.todoId,
-      targetDate,
-      addForm.value.startHour,
-      addForm.value.duration,
-      addForm.value.note,
-    )
-  } else {
-    planStore.addPlan({
-      title,
-      category: addForm.value.category,
-      duration: addForm.value.duration,
-      date: targetDate,
-      startHour: addForm.value.startHour,
-      note: addForm.value.note,
-    })
-  }
+  const created = addForm.value.todoId
+    ? planStore.scheduleFromTodo(
+        addForm.value.todoId,
+        targetDate,
+        addForm.value.startHour,
+        addForm.value.duration,
+        addForm.value.note,
+      )
+    : planStore.addPlan({
+        title,
+        category: addForm.value.category,
+        duration: addForm.value.duration,
+        date: targetDate,
+        startHour: addForm.value.startHour,
+        note: addForm.value.note,
+      })
 
   addVisible.value = false
+
+  // 只读模式下 store 会拒绝写入并给出提示，这里不再滚动也不再报「已添加」
+  if (!created) return
 
   // 目标日期可能还没被渲染出来，补齐后滚动过去，保证能看到结果
   await ensureDateRendered(targetDate)
@@ -728,6 +724,7 @@ function createDetailForm(plan) {
     startHour: Number(plan.startHour) || FIRST_HOUR,
     duration: Number(plan.duration) || DEFAULT_SLOT_MINUTES,
     note: plan.note || '',
+    link: plan.link || '',
   }
 }
 
@@ -761,6 +758,11 @@ const detailRange = computed(() => {
 })
 
 function openDetail(planId) {
+  // 详情已展开且点的是同一条日程 → 再点一次收起
+  if (detailVisible.value && detailId.value === planId) {
+    closeDetail()
+    return
+  }
   detailId.value = planId
   detailVisible.value = true
 }
@@ -779,8 +781,8 @@ function detailRollback() {
   if (!plan) return
 
   planStore.unschedulePlan(plan.id)
-  MessagePlugin.info(`「${plan.title}」已退回待办清单`)
   closeDetail()
+  if (isOnline.value) MessagePlugin.info(`「${plan.title}」已退回待办清单`)
 }
 
 function detailRemove() {
@@ -788,8 +790,8 @@ function detailRemove() {
   if (!plan) return
 
   planStore.removePlan(plan.id)
-  MessagePlugin.success(`「${plan.title}」已删除`)
   closeDetail()
+  if (isOnline.value) MessagePlugin.success(`「${plan.title}」已删除`)
 }
 
 /** 在详情里改了日期后，保证那一日已经渲染出来并滚动过去 */
@@ -866,9 +868,9 @@ watch(
                     v-else-if="!plansAt(date, hour).length"
                     type="button"
                     class="calendar__add"
-                    title="在此添加日程"
-                    aria-label="在此添加日程"
-                    @click="openAddDialog({ date, startHour: hour })"
+                    title="展开待办清单，拖日程到此处排班"
+                    aria-label="展开待办清单"
+                    @click="todoOpen = true"
                   >
                     <AddIcon />
                   </button>
@@ -959,10 +961,6 @@ watch(
 
           <div v-if="detailForm && detailPlan" class="detail">
             <div class="detail__head">
-              <span
-                class="detail__bar"
-                :style="{ backgroundColor: categoryColor(detailForm.category) }"
-              />
               <div class="detail__head-main">
                 <div class="detail__title">{{ detailForm.title }}</div>
                 <div class="detail__meta">{{ formatMD(detailForm.date) }} · {{ detailRange }}</div>
@@ -978,38 +976,18 @@ watch(
             </div>
 
             <div class="form-item">
-              <label class="form-label">科目</label>
-              <t-select v-model="detailForm.category" :options="categoryOptions" />
-            </div>
-
-            <div class="form-item">
-              <label class="form-label">日期</label>
-              <t-date-picker
-                v-model="detailForm.date"
-                value-type="YYYY-MM-DD"
-                format="YYYY-MM-DD"
-                style="width: 100%"
-              />
-            </div>
-
-            <div class="form-row">
-              <div class="form-item">
-                <label class="form-label">开始时间</label>
-                <t-select v-model="detailForm.startHour" :options="startOptions" />
-              </div>
-              <div class="form-item">
-                <label class="form-label">时长（分钟）</label>
-                <t-input-number v-model="detailForm.duration" :min="15" :max="600" :step="15" />
-              </div>
-            </div>
-
-            <div class="form-item">
-              <label class="form-label">备注</label>
-              <t-textarea
-                v-model="detailForm.note"
-                placeholder="选填，例如：重点复盘第 3 题"
-                :autosize="{ minRows: 3, maxRows: 6 }"
-              />
+              <label class="form-label">附件或链接</label>
+              <t-input v-model="detailForm.link" placeholder="粘贴网盘 / 文档链接，选填" clearable />
+              <a
+                v-if="detailForm.link"
+                class="detail__link"
+                :href="detailForm.link"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <LinkIcon />
+                打开链接
+              </a>
             </div>
 
             <div class="detail__actions">
@@ -1026,14 +1004,10 @@ watch(
       </div>
     </div>
 
-    <!-- 右下角待办清单 -->
-    <div v-show="!detailVisible" class="todo-dock" :class="{ 'is-drop-target': dragOverTodoPool }">
-      <transition name="dock-fade">
-        <div
-          v-if="todoOpen"
-          class="todo-dock__panel"
-          :class="{ 'is-drop-target': dragOverTodoPool }"
-        >
+    <!-- 待办清单：与日程详情同款，从右侧展开并挤压日程表 -->
+    <div class="todo-panel" :class="{ 'is-open': todoOpen && !detailVisible }">
+      <div class="todo-panel__inner">
+        <div class="todo-dock__panel" :class="{ 'is-drop-target': dragOverTodoPool }">
           <div class="todo-dock__head">
             <div class="todo-dock__title">
               <span>待办清单</span>
@@ -1118,16 +1092,7 @@ watch(
             </div>
           </div>
         </div>
-      </transition>
-
-      <t-button class="todo-dock__trigger" theme="primary" @click="todoOpen = !todoOpen">
-        <template #icon>
-          <CloseIcon v-if="todoOpen" />
-          <QueueIcon v-else />
-        </template>
-        {{ todoOpen ? '收起待办' : '待办清单' }}
-        <span v-if="planStore.todoCount" class="todo-dock__count">{{ planStore.todoCount }}</span>
-      </t-button>
+      </div>
     </div>
 
     <!-- 添加日程 -->
@@ -1184,14 +1149,28 @@ watch(
 
 <style scoped>
 /* 日程表与详情面板并排：面板展开时把日程表往左挤 */
+/* 撑满页面高度：减去顶栏 64px 与内容区上下内边距 24+40px */
 .schedule {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
+  height: calc(100vh - 128px);
 }
 
 .schedule__calendar-card {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* t-card 的内容外面还包了一层 .t-loading__parent，
+   两层都要接上 flex 高度链，日历才能拿到受限高度并内部上下滚动 */
+.schedule__calendar-card :deep(.t-loading__parent),
+.schedule__calendar-card :deep(.t-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------- 日历网格 ---------- */
@@ -1200,7 +1179,9 @@ watch(
   --calendar-date-width: 118px;
   --calendar-hour-width: 124px;
   position: relative;
-  max-height: 68vh;
+  /* 撑满卡片剩余高度，随视口自适应 */
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
   /* 向前插入日期时由代码自己补偿滚动位置，关掉浏览器滚动锚定避免双重补偿 */
@@ -1493,24 +1474,48 @@ watch(
   background-color: rgb(0 82 217 / 28%);
 }
 
-/* ---------- 右下角待办清单 ---------- */
+/* ---------- 待办清单 ---------- */
 
-.todo-dock {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 1000;
+/* 与日程详情同款：外层过渡宽度把日历往左挤，内层固定宽度避免内容被压变形 */
+.todo-panel {
+  flex: none;
+  width: 0;
+  overflow: hidden;
+  transition:
+    width 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    margin-left 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.todo-panel.is-open {
+  width: 320px;
+  margin-left: 16px;
+}
+
+.todo-panel__inner {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 12px;
+  width: 320px;
+  height: 100%;
+  transform: translateX(32px);
+  opacity: 0;
+  transition:
+    transform 0.16s ease-in,
+    opacity 0.16s ease-in;
+}
+
+.todo-panel.is-open .todo-panel__inner {
+  transform: translateX(0);
+  opacity: 1;
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.06s,
+    opacity 0.32s ease 0.1s;
 }
 
 .todo-dock__panel {
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-height: 0;
   width: 320px;
-  max-height: 62vh;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--td-radius-large);
   background-color: var(--td-bg-color-container);
@@ -1522,13 +1527,6 @@ watch(
 .todo-dock__panel.is-drop-target {
   border-color: var(--td-brand-color);
   box-shadow: 0 8px 28px rgb(0 82 217 / 24%);
-}
-
-/* 待办收起时也要给出「松手就退回待办」的反馈 */
-.todo-dock.is-drop-target .todo-dock__trigger {
-  box-shadow:
-    0 0 0 2px var(--td-brand-color),
-    0 6px 20px rgb(0 82 217 / 32%);
 }
 
 .todo-dock__head {
@@ -1680,39 +1678,6 @@ watch(
   color: var(--td-error-color);
 }
 
-.todo-dock__trigger {
-  align-self: flex-end;
-  box-shadow: 0 6px 20px rgb(0 82 217 / 32%);
-}
-
-.todo-dock__count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--td-brand-color);
-  background-color: #fff;
-}
-
-.dock-fade-enter-active,
-.dock-fade-leave-active {
-  transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
-}
-
-.dock-fade-enter-from,
-.dock-fade-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
 /* ---------- 日程详情面板 ---------- */
 
 /* 外层负责宽度过渡，内层保持固定宽度，这样展开时内容不会被挤变形 */
@@ -1721,8 +1686,8 @@ watch(
   width: 0;
   overflow: hidden;
   transition:
-    width 0.25s ease,
-    margin-left 0.25s ease;
+    width 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    margin-left 0.42s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .detail-panel.is-open {
@@ -1730,8 +1695,22 @@ watch(
   margin-left: 16px;
 }
 
+/* 内层做"跟进"动画：收起时快速淡出，展开时轻微右移滑入 + 淡入，错峰于宽度动画 */
 .detail-panel__inner {
   width: 380px;
+  transform: translateX(32px);
+  opacity: 0;
+  transition:
+    transform 0.16s ease-in,
+    opacity 0.16s ease-in;
+}
+
+.detail-panel.is-open .detail-panel__inner {
+  transform: translateX(0);
+  opacity: 1;
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.06s,
+    opacity 0.32s ease 0.1s;
 }
 
 .detail-card__title {
@@ -1766,14 +1745,6 @@ watch(
   margin-bottom: 22px;
 }
 
-.detail__bar {
-  width: 4px;
-  min-height: 36px;
-  align-self: stretch;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
 .detail__head-main {
   flex: 1;
   min-width: 0;
@@ -1789,6 +1760,20 @@ watch(
   margin-top: 4px;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+}
+
+.detail__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--td-brand-color);
+  text-decoration: none;
+}
+
+.detail__link:hover {
+  text-decoration: underline;
 }
 
 .detail__actions {
@@ -1826,6 +1811,15 @@ watch(
   .detail-panel__inner {
     width: 300px;
   }
+
+  .todo-panel.is-open {
+    width: 280px;
+  }
+
+  .todo-panel__inner,
+  .todo-dock__panel {
+    width: 280px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1835,14 +1829,13 @@ watch(
     --calendar-hour-width: 92px;
   }
 
-  .todo-dock {
-    right: 16px;
-    bottom: 16px;
+  .todo-panel.is-open {
+    width: 240px;
   }
 
+  .todo-panel__inner,
   .todo-dock__panel {
-    width: calc(100vw - 32px);
-    max-height: 56vh;
+    width: 240px;
   }
 
   .form-row {

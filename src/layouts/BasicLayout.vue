@@ -3,7 +3,10 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   CalendarIcon,
+  ErrorCircleIcon,
   HomeIcon,
+  InfoCircleIcon,
+  LoadingIcon,
   MoonIcon,
   QueueIcon,
   SettingIcon,
@@ -12,11 +15,36 @@ import {
 
 import { useAppStore } from '@/stores/app'
 import { usePlanStore } from '@/stores/plan'
+import { useSyncStore } from '@/stores/sync'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const planStore = usePlanStore()
+const syncStore = useSyncStore()
+
+// 启动即连接云端：拿到权威数据后才允许编辑，连不上会进入只读并自动重试
+void syncStore.connect()
+
+const noticeTheme = computed(() => {
+  if (syncStore.connectionState === 'unconfigured') return 'warning'
+  if (syncStore.connectionState === 'connecting') return 'info'
+  return 'danger'
+})
+
+const noticeActionText = computed(() => {
+  if (syncStore.connectionState === 'unconfigured') return '去设置'
+  if (syncStore.connectionState === 'offline') return '立即重试'
+  return ''
+})
+
+function handleNoticeAction() {
+  if (syncStore.connectionState === 'unconfigured') {
+    router.push('/settings')
+    return
+  }
+  void syncStore.connect()
+}
 
 const menus = [
   { value: '/home', label: '首页', icon: HomeIcon },
@@ -46,7 +74,7 @@ function handleMenuChange(value) {
     <t-header class="basic-layout__header">
       <div class="page-container basic-layout__bar">
         <div class="basic-layout__brand" @click="router.push('/home')">
-          <span class="basic-layout__logo">复</span>
+          <img class="basic-layout__logo" src="/favicon.svg" alt="复习清单图标" />
           <span class="basic-layout__title">复习清单</span>
         </div>
 
@@ -80,6 +108,31 @@ function handleMenuChange(value) {
         </div>
       </div>
     </t-header>
+
+    <div
+      v-if="syncStore.connectionState !== 'online'"
+      class="basic-layout__notice"
+      :class="`basic-layout__notice--${noticeTheme}`"
+    >
+      <div class="page-container basic-layout__notice-inner">
+        <LoadingIcon
+          v-if="syncStore.connectionState === 'connecting'"
+          class="basic-layout__spin"
+        />
+        <ErrorCircleIcon v-else-if="syncStore.connectionState === 'offline'" />
+        <InfoCircleIcon v-else />
+        <span class="basic-layout__notice-text">{{ syncStore.connectionMessage }}</span>
+        <t-button
+          v-if="noticeActionText"
+          size="small"
+          variant="text"
+          theme="primary"
+          @click="handleNoticeAction"
+        >
+          {{ noticeActionText }}
+        </t-button>
+      </div>
+    </div>
 
     <t-content class="basic-layout__content">
       <div class="page-container">
@@ -123,16 +176,11 @@ function handleMenuChange(value) {
 }
 
 .basic-layout__logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
-  font-size: 16px;
-  font-weight: 700;
-  color: #fff;
-  background: linear-gradient(135deg, #0052d9, #00a870);
+  object-fit: cover;
+  display: block;
 }
 
 .basic-layout__title {
@@ -163,6 +211,49 @@ function handleMenuChange(value) {
 .basic-layout__content {
   flex: 1;
   padding: 24px 0 40px;
+}
+
+.basic-layout__notice {
+  font-size: 13px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.basic-layout__notice-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.basic-layout__notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.basic-layout__notice--info {
+  color: var(--td-brand-color);
+  background-color: var(--td-brand-color-light);
+}
+
+.basic-layout__notice--warning {
+  color: var(--td-warning-color);
+  background-color: var(--td-warning-color-light);
+}
+
+.basic-layout__notice--danger {
+  color: var(--td-error-color);
+  background-color: var(--td-error-color-light);
+}
+
+.basic-layout__spin {
+  animation: basic-layout-spin 1s linear infinite;
+}
+
+@keyframes basic-layout-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 900px) {
