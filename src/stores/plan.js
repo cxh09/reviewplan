@@ -453,7 +453,6 @@ export const usePlanStore = defineStore('plan', () => {
     // actions
     addTodo,
     removeTodo,
-    addPlan,
     scheduleFromTodo,
     unschedulePlan,
     movePlan,
