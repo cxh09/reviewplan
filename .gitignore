@@ -4,6 +4,9 @@ dist-ssr
 *.local
 .DS_Store
 
+# 部署打包产物
+*.tar.gz
+
 # 日志
 logs
 *.log

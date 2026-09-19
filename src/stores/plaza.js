@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import {
@@ -8,17 +8,8 @@ import {
 } from '@/data/plaza'
 import { ensureWritable } from '@/utils/connection'
 import { createId } from '@/utils/id'
-import { createDebouncedWriter } from '@/utils/persist'
-import { readJSON } from '@/utils/storage'
 import { markDeleted, markDeletedMany } from '@/utils/tombstone'
 import { sanitizeLink } from '@/utils/url'
-
-const STORAGE_KEY = 'reviewplan:plaza:v1'
-
-function loadPersisted() {
-  const data = readJSON(STORAGE_KEY, {})
-  return data && typeof data === 'object' ? data : {}
-}
 
 function normalizeItem(raw) {
   return {
@@ -52,15 +43,11 @@ function normalizeCollection(raw) {
 
 /**
  * 日程广场：用户自己维护的「系列合集」以及合集里的日程。
- * 合集中的日程可以一键加入待办清单，再到日程表拖到时间线上排班。
+ * 全在线模式：数据以云端为唯一来源，初始为空，启动后由 sync store 拉取填充，改动经 sync 推回云端。
  */
 export const usePlazaStore = defineStore('plaza', () => {
-  const persisted = loadPersisted()
-
-  // 默认不预置任何合集，广场从空开始
-  const collections = ref(
-    Array.isArray(persisted.collections) ? persisted.collections.map(normalizeCollection) : [],
-  )
+  // 广场从空开始，等云端快照填充
+  const collections = ref([])
 
   // ---------- 派生数据 ----------
 
@@ -194,14 +181,6 @@ export const usePlazaStore = defineStore('plaza', () => {
     )
     collections.value = []
   }
-
-  // ---------- 持久化 ----------
-
-  const persistWriter = createDebouncedWriter(STORAGE_KEY, () => ({
-    collections: collections.value,
-  }))
-
-  watch(collections, () => persistWriter.schedule(), { deep: true })
 
   return {
     // state

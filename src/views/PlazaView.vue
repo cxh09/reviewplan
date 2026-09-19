@@ -226,6 +226,16 @@ function addCollectionToTodo(collection) {
 
 // ---------- 展示辅助 ----------
 
+/** 把分钟数格式化成「X 小时 Y 分」，不足 1 小时只显示分钟 */
+function formatDuration(minutes) {
+  const total = Number(minutes) || 0
+  if (!total) return ''
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  if (!h) return `${m} 分钟`
+  return m ? `${h} 小时 ${m} 分` : `${h} 小时`
+}
+
 function collectionColor(collection) {
   return plazaStore.collectionColor(collection)
 }
@@ -346,6 +356,9 @@ function goSchedule() {
             <div class="row__main">
               <div class="row__title-row">
                 <span class="row__title">{{ item.title }}</span>
+                <span v-if="item.duration" class="row__duration">
+                  预估 {{ formatDuration(item.duration) }}
+                </span>
               </div>
               <p v-if="item.desc" class="row__desc">{{ item.desc }}</p>
               <a
@@ -592,6 +605,11 @@ function goSchedule() {
 .row__title {
   font-size: 14px;
   font-weight: 600;
+}
+
+.row__duration {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .row__desc {

@@ -116,6 +116,11 @@ export function fetchSnapshot(baseUrl, token) {
   return request(baseUrl, '/api/data', { token })
 }
 
+/** 只拉版本号：轮询「云端是否变了」用，比整份快照轻得多 */
+export function fetchRev(baseUrl, token) {
+  return request(baseUrl, '/api/rev', { token })
+}
+
 /**
  * 上传整份快照。
  * rev 传数字时做乐观锁冲突检测；传 null 表示强制覆盖（不做校验）。

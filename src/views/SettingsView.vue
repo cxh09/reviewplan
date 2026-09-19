@@ -325,7 +325,8 @@ function confirmReset() {
         <div class="settings__label">
           <span class="settings__label-main">服务端地址</span>
           <span class="settings__label-tip">
-            例如 http://localhost:3000 或 http://192.168.1.10:3000
+            默认与当前网页同源（服务端同时托管页面与 API）；连接其它服务器时再改，例如
+            http://192.168.1.10:3000
           </span>
         </div>
         <div class="settings__control settings__control--wide">

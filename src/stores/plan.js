@@ -1,11 +1,9 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { ensureWritable } from '@/utils/connection'
 import { addDays, diffDays, parseDateKey, todayKey, toDateKey } from '@/utils/date'
 import { createId } from '@/utils/id'
-import { createDebouncedWriter } from '@/utils/persist'
-import { readJSON } from '@/utils/storage'
 import {
   activeTombstones,
   markDeleted,
@@ -13,8 +11,6 @@ import {
   setTombstones,
 } from '@/utils/tombstone'
 import { sanitizeLink } from '@/utils/url'
-
-const STORAGE_KEY = 'reviewplan:data:v1'
 
 /**
  * 导出数据的格式版本；导入时用它判断备份是否来自更新的版本。
@@ -39,11 +35,6 @@ export const DEFAULT_SLOT_MINUTES = 60
 /** 时长允许范围，与「添加日程 / 详情」里的 5 ~ 600 分钟保持一致 */
 const MIN_DURATION = 5
 const MAX_DURATION = 600
-
-function loadPersisted() {
-  const data = readJSON(STORAGE_KEY, null)
-  return data && typeof data === 'object' ? data : {}
-}
 
 function toNumber(value, fallback) {
   const num = Number(value)
@@ -97,21 +88,18 @@ function normalizePlan(raw) {
 }
 
 /**
- * 复习清单的核心数据：
+ * 复习清单的核心数据（全在线模式：数据以云端为唯一来源，本地不再落盘）：
  * - todos  待办清单（还没安排具体时间的复习任务）
  * - plans  排版计划（已安排到某天某个时段的复习任务）
+ *
+ * 初始为空，启动后由 sync store 拉取云端快照填充；任何改动经 sync 推回云端。
  */
 export const usePlanStore = defineStore('plan', () => {
-  const persisted = loadPersisted()
-
-  // 缓存里的数据同样走一遍归一化：补齐缺失字段、夹回合法范围、过滤危险的链接协议
-  const gaokaoDate = ref(
-    isValidDateKey(persisted.gaokaoDate) ? persisted.gaokaoDate : DEFAULT_GAOKAO_DATE,
-  )
-  const todos = ref(Array.isArray(persisted.todos) ? persisted.todos.map(normalizeTodo) : [])
-  const plans = ref(Array.isArray(persisted.plans) ? persisted.plans.map(normalizePlan) : [])
+  const gaokaoDate = ref(DEFAULT_GAOKAO_DATE)
+  const todos = ref([])
+  const plans = ref([])
   /** 高考日期自身的修改时间：合并两端快照时用来判断该用谁的日期 */
-  const gaokaoDateUpdatedAt = ref(toNumber(persisted.gaokaoDateUpdatedAt, 0))
+  const gaokaoDateUpdatedAt = ref(0)
 
   // ---------- 派生数据 ----------
 
@@ -258,13 +246,13 @@ export const usePlanStore = defineStore('plan', () => {
     const [todo] = todos.value.splice(index, 1)
     // 待办被「消耗」成计划：记一笔删除，否则合并时会被另一端的副本复活
     markDeleted(todo.id)
-    // 没指定时长时先占满这一小时的格子，之后再拖块边缘调整跨度
+    // 没指定时长时默认用待办的预估耗时，之后再拖块边缘调整跨度
     return addPlan({
       ...todo,
       todoId: todo.id,
       date,
       startHour,
-      duration: Number(duration) || DEFAULT_SLOT_MINUTES,
+      duration: Number(duration) || todo.duration || DEFAULT_SLOT_MINUTES,
       originDuration: todo.duration,
       note,
     })
@@ -419,20 +407,6 @@ export const usePlanStore = defineStore('plan', () => {
     gaokaoDate.value = DEFAULT_GAOKAO_DATE
     gaokaoDateUpdatedAt.value = Date.now()
   }
-
-  // ---------- 持久化 ----------
-
-  // 拖拽 / 拉伸会以帧频修改数据，防抖合并写入，避免每帧都全量序列化
-  const persistWriter = createDebouncedWriter(STORAGE_KEY, () => ({
-    gaokaoDate: gaokaoDate.value,
-    gaokaoDateUpdatedAt: gaokaoDateUpdatedAt.value,
-    todos: todos.value,
-    plans: plans.value,
-  }))
-
-  watch([gaokaoDate, gaokaoDateUpdatedAt, todos, plans], () => persistWriter.schedule(), {
-    deep: true,
-  })
 
   return {
     // state

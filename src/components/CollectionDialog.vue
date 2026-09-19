@@ -24,10 +24,7 @@ const autoColor = ref(COLLECTION_COLORS[0])
 const isEdit = computed(() => Boolean(props.collection))
 
 const rules = {
-  name: [
-    { required: true, message: '请输入合集名称', type: 'error', trigger: 'blur' },
-    { max: 20, message: '名称不要超过 20 个字', type: 'error', trigger: 'blur' },
-  ],
+  name: [{ required: true, message: '请输入合集名称', type: 'error', trigger: 'blur' }],
 }
 
 watch(visible, (value) => {

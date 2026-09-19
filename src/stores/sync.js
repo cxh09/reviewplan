@@ -4,7 +4,7 @@ import { MessagePlugin } from 'tdesign-vue-next/es/message'
 
 import { DATA_VERSION, usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
-import { fetchHealth, fetchSnapshot, normalizeServerUrl, putSnapshot } from '@/utils/api'
+import { fetchHealth, fetchRev, fetchSnapshot, normalizeServerUrl, putSnapshot } from '@/utils/api'
 import { connectionState, isOnline, setConnectionState } from '@/utils/connection'
 import { mergeSnapshots } from '@/utils/merge'
 import { readJSON, writeJSON } from '@/utils/storage'
@@ -12,11 +12,30 @@ import { activeTombstones } from '@/utils/tombstone'
 
 const STORAGE_KEY = 'reviewplan:server:v1'
 
+/**
+ * 服务端与网页同源部署（server 直接托管 dist/），首次使用默认连当前页面地址。
+ * 开发模式下由 vite 把 /api 代理到本地 3000，配置同样成立。
+ */
+const DEFAULT_SERVER_URL = window.location.origin
+
+/** 与 server/src/config.js 的 DEFAULT_ACCESS_TOKEN 保持一致，开箱即用 */
+const DEFAULT_ACCESS_TOKEN =
+  'XbleCYYPUduiiUfR8MxqHgsvQV1tX9zcQ6jBYV3BFmZsxIifKUL588pkXaLGU0fY'
+
+/** 没存过（undefined）用默认值；存过但被用户清空（''）则尊重清空 */
+function persistedOr(value, fallback) {
+  if (value === undefined) return fallback
+  return value || ''
+}
+
 /** 改动合并窗口（毫秒）：拖拽 / 拉伸会以帧频改数据，攒一下再发，避免打满请求 */
 const PUSH_DELAY = 300
 
 /** 断线重试间隔（毫秒） */
 const RETRY_DELAY = 3000
+
+/** 在线轮询间隔（毫秒）：查一次云端版本号，变了才拉整份，让多端秒级对齐 */
+const POLL_INTERVAL = 3000
 
 function loadPersisted() {
   const data = readJSON(STORAGE_KEY, {})
@@ -26,8 +45,9 @@ function loadPersisted() {
 /**
  * 云端数据源。
  *
- * 全在线模式：待办 / 计划 / 高考日期 / 日程广场合集都以服务端为准。
- * - 启动先按本地缓存渲染，随后 connect() 拉取云端覆盖；
+ * 全在线模式：待办 / 计划 / 高考日期 / 日程广场合集都以服务端为唯一来源，本地不落盘。
+ * - 启动后 connect() 拉取云端快照填充；在线期间每 3 秒轮询版本号（pollOnce），
+ *   云端被其它设备改动时自动拉取合并；标签页回到前台也会立即对一次账；
  * - 连不上时进入只读，并每隔几秒自动重试；
  * - 在线期间任何改动都会自动上传（合并 300ms 内的连续改动）；
  * - 版本冲突（409）不丢改动：拉云端快照与本地按条目（last-write-wins）合并后重推，
@@ -36,8 +56,8 @@ function loadPersisted() {
 export const useSyncStore = defineStore('sync', () => {
   const persisted = loadPersisted()
 
-  const serverUrl = ref(persisted.serverUrl || '')
-  const accessToken = ref(persisted.accessToken || '')
+  const serverUrl = ref(persistedOr(persisted.serverUrl, DEFAULT_SERVER_URL))
+  const accessToken = ref(persistedOr(persisted.accessToken, DEFAULT_ACCESS_TOKEN))
   const lastSyncAt = ref(Number(persisted.lastSyncAt) || 0)
   const rev = ref(Number(persisted.rev) || 0)
   const message = ref('')
@@ -182,6 +202,9 @@ export const useSyncStore = defineStore('sync', () => {
         return { ok: false, stale: true }
       }
 
+      // 记下应用云端数据之前的本地指纹，用于判断本地是否有还没推上去的改动
+      const localJson = JSON.stringify(buildPayload())
+
       // 服务端还没有数据时保留本地缓存，等用户第一次改动再整体上传
       let merged = null
       if (snapshot.data) {
@@ -196,12 +219,10 @@ export const useSyncStore = defineStore('sync', () => {
       if (snapshot.updatedAt) lastSyncAt.value = Date.parse(snapshot.updatedAt) || Date.now()
       syncedUrl = url
 
-      // 合并结果比云端新（本地有没推上去的改动）时，把指纹记成云端那份，
-      // 让随后的 schedulePush 把合并结果补推上去
-      const localJson = JSON.stringify(buildPayload())
-      const mergedJson = merged ? JSON.stringify(merged) : ''
-      syncedJson =
-        mergedJson && mergedJson !== localJson ? JSON.stringify(snapshot.data) : localJson
+      // 以云端指纹为同步基准：applyRemote 之后 schedulePush 会比对本地与云端，
+      // 本地确有云端没有的改动（上次没推上去的）时自动补推合并结果，一致则跳过。
+      // 注意 localJson 必须在 applyRemote 之前取，否则本地已被云端覆盖，比不出差异。
+      syncedJson = merged ? JSON.stringify(snapshot.data) : localJson
       persist()
 
       setConnectionState('online')
@@ -232,6 +253,51 @@ export const useSyncStore = defineStore('sync', () => {
         // 放到下一个 tick，避免和本次收尾逻辑交错
         window.setTimeout(() => void connect(), 0)
       }
+    }
+  }
+
+  /**
+   * 拉云端最新快照，与本地合并后应用（保留还没推上去的本地改动）。
+   * 轮询发现版本变化、或标签页回到前台时调用。
+   */
+  async function pullRemote() {
+    if (connecting || pushInFlight) return
+    const url = normalizedUrl.value
+    const token = accessToken.value
+
+    let snapshot
+    try {
+      snapshot = await fetchSnapshot(url, token)
+    } catch {
+      // 轮询期间的一次拉取失败不打紧，下一轮或 push 时会再触发重连
+      return
+    }
+    // 拉取期间改了地址 / 令牌，结果作废
+    if (url !== normalizedUrl.value || token !== accessToken.value) return
+    if (!snapshot.data) return
+
+    // 按条目 last-write-wins 合并：云端更新的覆盖本地，本地没推上去的改动也保住
+    const merged = mergeSnapshots(buildPayload(), snapshot.data)
+    await applyRemote(merged)
+
+    rev.value = Number(snapshot.rev) || 0
+    if (snapshot.updatedAt) lastSyncAt.value = Date.parse(snapshot.updatedAt) || Date.now()
+    syncedUrl = url
+    // 指纹记成云端那份：本地若确有未推改动，下面的 schedulePush 会把合并结果补推
+    syncedJson = JSON.stringify(snapshot.data)
+    persist()
+    message.value = `已同步云端 · 版本 ${rev.value}`
+    schedulePush()
+  }
+
+  /** 轮询一次：先查版本号，和云端对不上才拉整份快照 */
+  async function pollOnce() {
+    if (!isOnline.value || connecting || pushInFlight) return
+    try {
+      const remote = await fetchRev(normalizedUrl.value, accessToken.value)
+      if (Number(remote.rev) !== rev.value) await pullRemote()
+    } catch {
+      // 网络抖动 / 令牌问题：留给 push、retry 或下一轮处理
     }
   }
 
@@ -432,16 +498,40 @@ export const useSyncStore = defineStore('sync', () => {
 
   const planStore = usePlanStore()
   const plazaStore = usePlazaStore()
+  // 源必须全部写成 getter：planStore.todos / plans 与 plazaStore.collections 在
+  // applyRemote→importData 里是整体替换数组（collections.value = 新数组），
+  // 若直接传数组引用，watcher 会一直盯着被替换掉的旧数组，之后的编辑永不触发推送。
   watch(
-    [() => planStore.gaokaoDate, planStore.todos, planStore.plans, plazaStore.collections],
+    [
+      () => planStore.gaokaoDate,
+      () => planStore.todos,
+      () => planStore.plans,
+      () => plazaStore.collections,
+    ],
     schedulePush,
     { deep: true },
+  )
+
+  // 在线期间定时轮询云端版本号，让其它设备的改动几秒内同步过来
+  let pollTimer = null
+  watch(
+    isOnline,
+    (online) => {
+      if (pollTimer !== null) {
+        window.clearInterval(pollTimer)
+        pollTimer = null
+      }
+      if (online) pollTimer = window.setInterval(() => void pollOnce(), POLL_INTERVAL)
+    },
+    { immediate: true },
   )
 
   if (typeof window !== 'undefined') {
     window.addEventListener('pagehide', flushPending)
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') flushPending()
+      // 切回前台立刻对一次账，不等下一个轮询周期
+      else void pollOnce()
     })
   }
 

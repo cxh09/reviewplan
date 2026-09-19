@@ -27,6 +27,14 @@ export default defineConfig({
     host: true,
     port: 5173,
     open: false,
+    // 前端默认连「与页面同源」的服务端；开发时把 /api 代理到本地后端，
+    // 让 5173 上的默认配置也能直接连上后端。后端换端口时用 API_TARGET 覆盖。
+    proxy: {
+      '/api': {
+        target: process.env.API_TARGET || 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: 'dist',
