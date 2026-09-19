@@ -45,7 +45,7 @@ function loadPersisted() {
 /**
  * 云端数据源。
  *
- * 全在线模式：待办 / 计划 / 高考日期 / 日程广场合集都以服务端为唯一来源，本地不落盘。
+ * 全在线模式：计划 / 高考日期 / 日程广场合集都以服务端为唯一来源，本地不落盘。
  * - 启动后 connect() 拉取云端快照填充；在线期间每 3 秒轮询版本号（pollOnce），
  *   云端被其它设备改动时自动拉取合并；标签页回到前台也会立即对一次账；
  * - 连不上时进入只读，并每隔几秒自动重试；
@@ -140,7 +140,6 @@ export const useSyncStore = defineStore('sync', () => {
     return {
       gaokaoDate: planStore.gaokaoDate,
       gaokaoDateUpdatedAt: planStore.gaokaoDateUpdatedAt,
-      todos: JSON.parse(JSON.stringify(planStore.todos)),
       plans: JSON.parse(JSON.stringify(planStore.plans)),
       collections: plazaStore.exportData(),
       deleted: activeTombstones(),
@@ -157,7 +156,6 @@ export const useSyncStore = defineStore('sync', () => {
         version: DATA_VERSION,
         gaokaoDate: data?.gaokaoDate,
         gaokaoDateUpdatedAt: data?.gaokaoDateUpdatedAt,
-        todos: data?.todos,
         plans: data?.plans,
         deleted: data?.deleted,
       })
@@ -498,13 +496,12 @@ export const useSyncStore = defineStore('sync', () => {
 
   const planStore = usePlanStore()
   const plazaStore = usePlazaStore()
-  // 源必须全部写成 getter：planStore.todos / plans 与 plazaStore.collections 在
+  // 源必须全部写成 getter：planStore.plans 与 plazaStore.collections 在
   // applyRemote→importData 里是整体替换数组（collections.value = 新数组），
   // 若直接传数组引用，watcher 会一直盯着被替换掉的旧数组，之后的编辑永不触发推送。
   watch(
     [
       () => planStore.gaokaoDate,
-      () => planStore.todos,
       () => planStore.plans,
       () => plazaStore.collections,
     ],

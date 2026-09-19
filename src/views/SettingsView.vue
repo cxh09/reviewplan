@@ -148,7 +148,7 @@ function refreshFromCloud() {
 
   const dialog = DialogPlugin.confirm({
     header: '从云端刷新',
-    body: '会丢弃本地缓存，用云端的待办清单、排版计划、高考日期与广场合集重新覆盖。确认继续？',
+    body: '会丢弃本地缓存，用云端的排版计划、高考日期与广场合集重新覆盖。确认继续？',
     theme: 'warning',
     confirmBtn: { content: '确认刷新' },
     cancelBtn: '取消',
@@ -233,7 +233,7 @@ async function handleFileChange(event) {
 function confirmReset() {
   const dialog = DialogPlugin.confirm({
     header: '确认清空所有数据',
-    body: '会同时清空云端与本地的待办清单、排版计划、日程广场合集，并把高考日期恢复为默认值。该操作不可撤销，建议先导出备份。',
+    body: '会同时清空云端与本地的排版计划、日程广场合集，并把高考日期恢复为默认值。该操作不可撤销，建议先导出备份。',
     theme: 'warning',
     confirmBtn: { content: '确认清空', theme: 'danger' },
     cancelBtn: '再想想',
@@ -393,7 +393,7 @@ function confirmReset() {
       </div>
 
       <p class="settings__note">
-        全在线模式：待办清单、排版计划、高考日期与日程广场合集都以服务端为准，任何改动都会立即上传；连不上服务端时进入只读并每 3 秒自动重试；多端同时改动会按条目自动合并（同一条谁的时间戳新谁生效），只有在合不上时才退回以云端为准。浏览器里只保留一份用于首屏快速渲染的缓存。
+        全在线模式：排版计划、高考日期与日程广场合集都以服务端为准，任何改动都会立即上传；连不上服务端时进入只读并每 3 秒自动重试；多端同时改动会按条目自动合并（同一条谁的时间戳新谁生效），只有在合不上时才退回以云端为准。浏览器里只保留一份用于首屏快速渲染的缓存。
       </p>
     </t-card>
 
@@ -405,8 +405,8 @@ function confirmReset() {
       <t-row :gutter="[16, 16]" class="settings__stats">
         <t-col :xs="6" :md="6">
           <div class="settings__stat">
-            <span class="settings__stat-value">{{ planStore.todoCount }}</span>
-            <span class="settings__stat-label">待办清单</span>
+            <span class="settings__stat-value">{{ planStore.planCount - planStore.donePlanCount }}</span>
+            <span class="settings__stat-label">未完成</span>
           </div>
         </t-col>
         <t-col :xs="6" :md="6">

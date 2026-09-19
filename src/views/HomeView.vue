@@ -29,7 +29,7 @@ const motivateText = computed(() => {
 })
 
 const statCards = computed(() => [
-  { title: '待办清单', value: planStore.todoCount, unit: '项' },
+  { title: '未完成', value: planStore.planCount - planStore.donePlanCount, unit: '项' },
   { title: '已排计划', value: planStore.planCount, unit: '项' },
   { title: '已完成', value: planStore.donePlanCount, unit: '项' },
   { title: '本周完成率', value: planStore.weekStats.rate, unit: '%' },
@@ -75,10 +75,10 @@ const statCards = computed(() => [
       <t-empty
         v-if="!planStore.upcomingGroups.length"
         title="还没有排版计划"
-        description="先去日程广场挑几条日程加入待办清单，再到日程表拖到时间线上排班"
+        description="点日程表右上角的「+」打开日程广场，挑几条日程直接拖到时间线上排班"
       >
         <template #action>
-          <t-button theme="primary" @click="router.push('/plaza')">去日程广场</t-button>
+          <t-button theme="primary" @click="router.push('/schedule')">去日程表排班</t-button>
         </template>
       </t-empty>
 

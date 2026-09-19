@@ -14,10 +14,11 @@ import { sanitizeLink } from '@/utils/url'
 
 /**
  * 导出数据的格式版本；导入时用它判断备份是否来自更新的版本。
- * v2：导出内容在待办 / 计划之外额外带上了日程广场的系列合集。
+ * v2：导出内容在计划之外额外带上了日程广场的系列合集。
  * v3：条目带上 updatedAt、快照带上 gaokaoDateUpdatedAt 与删除标记，用于两端按条目合并。
+ * v4：取消中间的「待办清单」，日程广场直接排到日程表，快照不再携带 todos。
  */
-export const DATA_VERSION = 3
+export const DATA_VERSION = 4
 
 /** 默认高考日期（2027 年高考首日） */
 export const DEFAULT_GAOKAO_DATE = '2027-06-07'
@@ -51,37 +52,24 @@ function isValidDateKey(key) {
   return toDateKey(parseDateKey(key)) === key
 }
 
-/** 兼容旧数据与导入数据：补齐待办缺失字段 */
-function normalizeTodo(raw) {
+/** 兼容旧数据与导入数据：补齐缺失字段并夹回合法范围 */
+function normalizePlan(raw) {
   return {
-    id: raw?.id || createId('todo'),
-    title: `${raw?.title || ''}`.trim() || '未命名待办',
+    id: raw?.id || createId('plan'),
+    title: `${raw?.title || ''}`.trim() || '未命名日程',
     category: raw?.category || '通用',
     level: raw?.level || '基础',
-    duration: Math.round(clamp(toNumber(raw?.duration, 30), MIN_DURATION, MAX_DURATION)),
+    duration: Math.round(
+      clamp(toNumber(raw?.duration, DEFAULT_SLOT_MINUTES), MIN_DURATION, MAX_DURATION),
+    ),
     desc: raw?.desc || '',
     link: sanitizeLink(raw?.link),
     source: raw?.source || 'manual',
     createdAt: toNumber(raw?.createdAt, Date.now()),
     // 0 表示历史数据（没有时间戳），合并时视为最旧
     updatedAt: toNumber(raw?.updatedAt, 0),
-  }
-}
-
-/** 兼容旧数据与导入数据：在待办字段基础上补齐排班字段并夹回合法范围 */
-function normalizePlan(raw) {
-  return {
-    ...normalizeTodo(raw),
-    id: raw?.id || createId('plan'),
-    todoId: raw?.todoId ?? null,
     date: isValidDateKey(raw?.date) ? raw.date : todayKey(),
     startHour: clamp(toNumber(raw?.startHour, FIRST_HOUR), FIRST_HOUR, END_HOUR - 0.25),
-    duration: Math.round(
-      clamp(toNumber(raw?.duration, DEFAULT_SLOT_MINUTES), MIN_DURATION, MAX_DURATION),
-    ),
-    originDuration: Number.isFinite(Number(raw?.originDuration))
-      ? Number(raw.originDuration)
-      : null,
     note: raw?.note || '',
     done: Boolean(raw?.done),
   }
@@ -89,14 +77,14 @@ function normalizePlan(raw) {
 
 /**
  * 复习清单的核心数据（全在线模式：数据以云端为唯一来源，本地不再落盘）：
- * - todos  待办清单（还没安排具体时间的复习任务）
  * - plans  排版计划（已安排到某天某个时段的复习任务）
  *
+ * 「日程广场」里的日程是排班的素材库：点一条或把它拖到时间线上，
+ * 就直接生成一条排版计划（scheduleFromPlaza），不再有中间的待办缓冲。
  * 初始为空，启动后由 sync store 拉取云端快照填充；任何改动经 sync 推回云端。
  */
 export const usePlanStore = defineStore('plan', () => {
   const gaokaoDate = ref(DEFAULT_GAOKAO_DATE)
-  const todos = ref([])
   const plans = ref([])
   /** 高考日期自身的修改时间：合并两端快照时用来判断该用谁的日期 */
   const gaokaoDateUpdatedAt = ref(0)
@@ -104,7 +92,6 @@ export const usePlanStore = defineStore('plan', () => {
   // ---------- 派生数据 ----------
 
   const daysToGaokao = computed(() => diffDays(todayKey(), gaokaoDate.value))
-  const todoCount = computed(() => todos.value.length)
   const planCount = computed(() => plans.value.length)
   const donePlanCount = computed(() => plans.value.filter((plan) => plan.done).length)
   const completionRate = computed(() =>
@@ -139,63 +126,6 @@ export const usePlanStore = defineStore('plan', () => {
     return { total, done, rate: total ? Math.round((done / total) * 100) : 0 }
   })
 
-  // ---------- 待办清单 ----------
-
-  /** 加入待办清单，同标题同科目视为同一条 */
-  function addTodo({
-    title,
-    category = '通用',
-    duration = 30,
-    level = '基础',
-    desc = '',
-    link = '',
-    source = 'manual',
-  }) {
-    if (!ensureWritable()) return null
-
-    const trimmed = `${title || ''}`.trim()
-    if (!trimmed) return null
-
-    const existing = todos.value.find(
-      (todo) => todo.title === trimmed && todo.category === category,
-    )
-    if (existing) return existing
-
-    const todo = {
-      id: createId('todo'),
-      title: trimmed,
-      category,
-      duration: Number(duration) || 30,
-      level,
-      desc,
-      link: sanitizeLink(link),
-      source,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
-    todos.value.push(todo)
-    return todo
-  }
-
-  function removeTodo(id) {
-    if (!ensureWritable()) return
-    markDeleted(id)
-    todos.value = todos.value.filter((todo) => todo.id !== id)
-  }
-
-  /**
-   * 待办里是否已有这条日程。
-   * 传了 category 时按「标题 + 科目」判断，与 addTodo 的去重口径保持一致；
-   * 不传时只按标题判断。
-   */
-  function hasTodo(title, category) {
-    const trimmed = `${title || ''}`.trim()
-    if (!trimmed) return false
-    return todos.value.some(
-      (todo) => todo.title === trimmed && (category === undefined || todo.category === category),
-    )
-  }
-
   // ---------- 排版计划 ----------
 
   function addPlan({
@@ -209,18 +139,14 @@ export const usePlanStore = defineStore('plan', () => {
     date,
     startHour,
     note = '',
-    todoId = null,
-    originDuration = null,
   }) {
     if (!ensureWritable()) return null
 
     const plan = {
       id: createId('plan'),
-      todoId,
       title,
       category,
       duration: Number(duration) || DEFAULT_SLOT_MINUTES,
-      originDuration,
       level,
       desc,
       link: sanitizeLink(link),
@@ -236,49 +162,27 @@ export const usePlanStore = defineStore('plan', () => {
     return plan
   }
 
-  /** 把待办清单里的条目拖到时间线上：从待办移到计划 */
-  function scheduleFromTodo(todoId, date, startHour, duration, note = '') {
+  /**
+   * 把「日程广场」里的一条日程直接排到时间线上（生成一条排版计划）。
+   * 同一条可反复排到不同时段，不做去重。
+   */
+  function scheduleFromPlaza(item, date, startHour, { duration, note = '' } = {}) {
     if (!ensureWritable()) return null
 
-    const index = todos.value.findIndex((todo) => todo.id === todoId)
-    if (index === -1) return null
+    const title = `${item?.title || ''}`.trim()
+    if (!title) return null
 
-    const [todo] = todos.value.splice(index, 1)
-    // 待办被「消耗」成计划：记一笔删除，否则合并时会被另一端的副本复活
-    markDeleted(todo.id)
-    // 没指定时长时默认用待办的预估耗时，之后再拖块边缘调整跨度
     return addPlan({
-      ...todo,
-      todoId: todo.id,
+      title,
+      category: item.category || '通用',
+      level: item.level || '基础',
+      desc: item.desc || '',
+      link: item.link || '',
+      source: 'plaza',
       date,
       startHour,
-      duration: Number(duration) || todo.duration || DEFAULT_SLOT_MINUTES,
-      originDuration: todo.duration,
+      duration: Number(duration) || item.duration || DEFAULT_SLOT_MINUTES,
       note,
-    })
-  }
-
-  /** 把计划退回到待办清单 */
-  function unschedulePlan(planId) {
-    if (!ensureWritable()) return
-
-    const index = plans.value.findIndex((plan) => plan.id === planId)
-    if (index === -1) return
-
-    const [plan] = plans.value.splice(index, 1)
-    markDeleted(plan.id)
-    todos.value.push({
-      id: createId('todo'),
-      title: plan.title,
-      category: plan.category,
-      // 排班时可能被改成了一小时，退回待办还原成条目原本的时长
-      duration: Number(plan.originDuration) || plan.duration,
-      level: plan.level,
-      desc: plan.desc,
-      link: plan.link || '',
-      source: plan.source || 'manual',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
     })
   }
 
@@ -366,7 +270,6 @@ export const usePlanStore = defineStore('plan', () => {
         exportedAt: new Date().toISOString(),
         gaokaoDate: gaokaoDate.value,
         gaokaoDateUpdatedAt: gaokaoDateUpdatedAt.value,
-        todos: todos.value,
         plans: plans.value,
         deleted: activeTombstones(),
       },
@@ -388,7 +291,7 @@ export const usePlanStore = defineStore('plan', () => {
     }
 
     // 逐条归一化：缺 id / 非法日期 / 越界时长都会被修正，不会写进脏数据
-    if (Array.isArray(data.todos)) todos.value = data.todos.map(normalizeTodo)
+    // 旧备份里可能还带着 todos，直接忽略（已取消待办缓冲）
     if (Array.isArray(data.plans)) plans.value = data.plans.map(normalizePlan)
     if (isValidDateKey(data.gaokaoDate)) {
       gaokaoDate.value = data.gaokaoDate
@@ -401,8 +304,7 @@ export const usePlanStore = defineStore('plan', () => {
   function resetAll() {
     if (!ensureWritable()) return
     // 清空也是一次删除：不记标记的话，另一端残留的副本会把数据带回来
-    markDeletedMany([...todos.value.map((item) => item.id), ...plans.value.map((item) => item.id)])
-    todos.value = []
+    markDeletedMany(plans.value.map((item) => item.id))
     plans.value = []
     gaokaoDate.value = DEFAULT_GAOKAO_DATE
     gaokaoDateUpdatedAt.value = Date.now()
@@ -412,23 +314,18 @@ export const usePlanStore = defineStore('plan', () => {
     // state
     gaokaoDate,
     gaokaoDateUpdatedAt,
-    todos,
     plans,
     // getters
     daysToGaokao,
-    todoCount,
     planCount,
     donePlanCount,
     completionRate,
     upcomingGroups,
     weekStats,
     plansOfDate,
-    hasTodo,
     // actions
-    addTodo,
-    removeTodo,
-    scheduleFromTodo,
-    unschedulePlan,
+    addPlan,
+    scheduleFromPlaza,
     movePlan,
     resizePlan,
     updatePlan,

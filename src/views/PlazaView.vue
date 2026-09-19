@@ -5,7 +5,6 @@ import { DialogPlugin } from 'tdesign-vue-next/es/dialog'
 import { MessagePlugin } from 'tdesign-vue-next/es/message'
 import {
   AddIcon,
-  CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
@@ -13,17 +12,14 @@ import {
   EditIcon,
   LinkIcon,
   SearchIcon,
-  StarIcon,
 } from 'tdesign-icons-vue-next'
 
 import CollectionDialog from '@/components/CollectionDialog.vue'
 import PlazaItemDialog from '@/components/PlazaItemDialog.vue'
-import { usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
 import { isOnline } from '@/utils/connection'
 
 const router = useRouter()
-const planStore = usePlanStore()
 const plazaStore = usePlazaStore()
 
 const keyword = ref('')
@@ -122,7 +118,7 @@ function submitCollection(payload) {
 function confirmRemoveCollection(collection) {
   const dialog = DialogPlugin.confirm({
     header: '删除系列合集',
-    body: `确认删除「${collection.name}」？里面的 ${collection.items.length} 条日程会一并删除，已经加入待办清单的日程不受影响。`,
+    body: `确认删除「${collection.name}」？里面的 ${collection.items.length} 条日程会一并删除，已经排到日程表的日程不受影响。`,
     theme: 'warning',
     confirmBtn: { content: '删除', theme: 'danger' },
     cancelBtn: '再想想',
@@ -182,48 +178,6 @@ function confirmRemoveItem(collection, item) {
   })
 }
 
-// ---------- 加入待办清单 ----------
-
-function isInTodo(item) {
-  // 传科目，与 addTodo 的「标题 + 科目」去重口径保持一致
-  return planStore.hasTodo(item.title, item.category)
-}
-
-/** @returns {boolean} 是否真的新增了一条 */
-function addItemSilently(item) {
-  const existed = isInTodo(item)
-  const todo = planStore.addTodo({
-    title: item.title,
-    category: item.category,
-    level: item.level,
-    duration: item.duration,
-    desc: item.desc,
-    link: item.link,
-    source: 'plaza',
-  })
-  // 只读模式下 addTodo 返回 null，此时 store 已经弹过提示
-  return Boolean(todo) && !existed
-}
-
-function addItemToTodo(item) {
-  if (!addItemSilently(item)) {
-    MessagePlugin.info(`「${item.title}」已经在待办清单里了`)
-    return
-  }
-  MessagePlugin.success(`「${item.title}」已加入待办清单`)
-}
-
-function addCollectionToTodo(collection) {
-  const pending = collection.items.filter((item) => !isInTodo(item))
-  if (!pending.length) {
-    MessagePlugin.info(`「${collection.name}」里的日程都已在待办清单中`)
-    return
-  }
-  // 批量加入只弹一条汇总，避免每条各弹一次刷屏
-  const added = pending.filter(addItemSilently).length
-  MessagePlugin.success(`已加入 ${added} 条日程到待办清单`)
-}
-
 // ---------- 展示辅助 ----------
 
 /** 把分钟数格式化成「X 小时 Y 分」，不足 1 小时只显示分钟 */
@@ -252,7 +206,7 @@ function goSchedule() {
         <div>
           <h2 class="plaza__title">日程广场</h2>
           <p class="plaza__subtitle">
-            每个系列合集下面直接列出它的日程：可以自己新建合集、往里加日程，也可以一键把整个合集送进待办清单。
+            每个系列合集下面直接列出它的日程：在这里新建合集、往里加日程，再回到日程表点“＋”把它们拖到时间线上排班。
           </p>
         </div>
         <t-space size="12" break-line>
@@ -279,7 +233,6 @@ function goSchedule() {
         <div class="plaza__summary">
           <span>{{ plazaStore.collectionCount }} 个系列合集</span>
           <span>{{ plazaStore.itemCount }} 条日程</span>
-          <span>待办清单 {{ planStore.todoCount }} 项</span>
         </div>
       </div>
     </t-card>
@@ -310,15 +263,6 @@ function goSchedule() {
           <span class="col__count">{{ collection.items.length }} 条日程</span>
 
           <div class="col__ops">
-            <t-button
-              size="small"
-              theme="primary"
-              variant="outline"
-              @click="addCollectionToTodo(collection)"
-            >
-              <template #icon><StarIcon /></template>
-              一键加入待办
-            </t-button>
             <t-button
               size="small"
               theme="default"
@@ -375,20 +319,6 @@ function goSchedule() {
             </div>
 
             <div class="row__ops">
-              <t-button
-                v-if="!isInTodo(item)"
-                size="small"
-                theme="primary"
-                variant="outline"
-                @click="addItemToTodo(item)"
-              >
-                <template #icon><AddIcon /></template>
-                加入待办
-              </t-button>
-              <t-button v-else size="small" theme="success" variant="outline" disabled>
-                <template #icon><CheckCircleIcon /></template>
-                已在待办
-              </t-button>
               <t-button
                 size="small"
                 variant="text"

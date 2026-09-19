@@ -3,16 +3,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next/es/message'
 import {
   AddIcon,
-  CalendarIcon,
   CheckIcon,
   CloseIcon,
-  DeleteIcon,
   DragMoveIcon,
   LinkIcon,
+  ShareIcon,
 } from 'tdesign-icons-vue-next'
 
 import { categoryColor, levelTheme } from '@/data/plaza'
 import { DEFAULT_SLOT_MINUTES, TIMELINE_HOURS, usePlanStore } from '@/stores/plan'
+import { usePlazaStore } from '@/stores/plaza'
+import { useSyncStore } from '@/stores/sync'
+import { createShare } from '@/utils/api'
 import { isOnline } from '@/utils/connection'
 import {
   addDays,
@@ -27,6 +29,66 @@ import {
 } from '@/utils/date'
 
 const planStore = usePlanStore()
+const plazaStore = usePlazaStore()
+const syncStore = useSyncStore()
+
+// ---------- 分享：选择日期范围，生成 /share/xxxx 只读链接 ----------
+
+const shareVisible = ref(false)
+const shareStart = ref('')
+const shareEnd = ref('')
+const shareSubmitting = ref(false)
+const shareUrl = ref('')
+
+function openShare() {
+  shareStart.value = todayKey()
+  shareEnd.value = addDays(todayKey(), 7)
+  shareUrl.value = ''
+  shareVisible.value = true
+}
+
+async function generateShare() {
+  if (!syncStore.configured) {
+    MessagePlugin.warning('请先在「设置」里配置服务端地址')
+    return
+  }
+  if (!shareStart.value || !shareEnd.value) {
+    MessagePlugin.warning('请选择起止日期')
+    return
+  }
+  if (shareStart.value > shareEnd.value) {
+    MessagePlugin.warning('开始日期不能晚于结束日期')
+    return
+  }
+  shareSubmitting.value = true
+  try {
+    const res = await createShare(
+      syncStore.normalizedUrl,
+      syncStore.accessToken,
+      shareStart.value,
+      shareEnd.value,
+    )
+    shareUrl.value = `${syncStore.normalizedUrl}/share/${res.code}`
+    MessagePlugin.success('分享链接已生成')
+  } catch (err) {
+    MessagePlugin.error(err?.message || '生成分享链接失败')
+  } finally {
+    shareSubmitting.value = false
+  }
+}
+
+async function copyShare() {
+  if (!shareUrl.value) return
+  try {
+    await navigator.clipboard.writeText(shareUrl.value)
+    MessagePlugin.success('链接已复制')
+  } catch {
+    MessagePlugin.warning('复制失败，请手动选中链接复制')
+  }
+}
+
+/** 日程广场面板里只列出非空的合集 */
+const plazaCollections = computed(() => plazaStore.collections.filter((c) => c.items.length))
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max)
@@ -43,14 +105,14 @@ const SNAP_MINUTES = 15
 /** 吸附步长换算成小时（0.25h），开始时间也按它取整 */
 const SNAP_HOURS = SNAP_MINUTES / 60
 
-/** 正在拖拽的内容：{ kind: 'todo' | 'plan', id, title } */
+/** 正在拖拽的内容：{ kind: 'plaza' | 'plan', id, title, item? } */
 const dragging = ref(null)
 /** 悬停的单元格，key 为 `日期#小时` */
 const dragOverCell = ref(null)
-/** 是否悬停在待办面板上（把计划拖回来 = 取消排班） */
-const dragOverTodoPool = ref(false)
-/** 右下角待办清单是否展开 */
-const todoOpen = ref(false)
+/** 是否悬停在日程广场面板上（把计划拖回来 = 取消排班） */
+const dragOverPlazaPool = ref(false)
+/** 右侧日程广场面板是否展开 */
+const plazaOpen = ref(false)
 
 // ---------- 连续日程：按需扩展日期 ----------
 
@@ -469,10 +531,10 @@ function onBlockPointerDown(event, plan) {
   beginPointerTracking(event, { kind: 'plan', id: plan.id, title: plan.title })
 }
 
-/** 待办清单里的卡片 */
-function onTodoPointerDown(event, todo) {
+/** 日程广场面板里的卡片 */
+function onPlazaPointerDown(event, item) {
   if (event.button !== 0) return
-  beginPointerTracking(event, { kind: 'todo', id: todo.id, title: todo.title })
+  beginPointerTracking(event, { kind: 'plaza', id: item.id, title: item.title, item })
 }
 
 function handlePointerMove(event) {
@@ -483,7 +545,12 @@ function handlePointerMove(event) {
     const dx = event.clientX - pendingDrag.startX
     const dy = event.clientY - pendingDrag.startY
     if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return
-    dragging.value = { kind: pendingDrag.kind, id: pendingDrag.id, title: pendingDrag.title }
+    dragging.value = {
+      kind: pendingDrag.kind,
+      id: pendingDrag.id,
+      title: pendingDrag.title,
+      item: pendingDrag.item,
+    }
   }
 
   event.preventDefault()
@@ -491,7 +558,7 @@ function handlePointerMove(event) {
   updateDragTarget()
 }
 
-/** 用指针坐标反查落点：日历格子 / 待办面板 / 都不是 */
+/** 用指针坐标反查落点：日历格子 / 日程广场面板 / 都不是 */
 function resolveDropTarget(x, y) {
   const el = document.elementFromPoint(x, y)
   const cell = el?.closest?.('.calendar__cell')
@@ -505,7 +572,7 @@ function resolveDropTarget(x, y) {
     const startHour = clamp(hour + offsetMinutes / 60, FIRST_HOUR, END_HOUR - SNAP_HOURS)
     return { type: 'cell', date: cell.dataset.date, hour, startHour }
   }
-  // 展开的待办面板整体都是合法落点
+  // 展开的日程广场面板整体都是合法落点
   if (el?.closest?.('.todo-panel')) return { type: 'pool' }
   return null
 }
@@ -513,7 +580,7 @@ function resolveDropTarget(x, y) {
 function updateDragTarget() {
   const target = resolveDropTarget(lastPointer.x, lastPointer.y)
   dragOverCell.value = target?.type === 'cell' ? `${target.date}#${target.hour}` : null
-  dragOverTodoPool.value = target?.type === 'pool'
+  dragOverPlazaPool.value = target?.type === 'pool'
 }
 
 /** 拖到日历边缘时自动滚动，方便把卡片拖到屏幕外的时间 */
@@ -573,14 +640,14 @@ function handlePointerUp(event) {
 
   // 拖动结束后卡片本身就会落到新位置，不再弹提示
   if (target.type === 'pool') {
-    if (payload.kind === 'plan') planStore.unschedulePlan(payload.id)
+    if (payload.kind === 'plan') planStore.removePlan(payload.id)
     return
   }
 
   const { date, startHour } = target
 
-  if (payload.kind === 'todo') {
-    planStore.scheduleFromTodo(payload.id, date, startHour)
+  if (payload.kind === 'plaza') {
+    planStore.scheduleFromPlaza(payload.item, date, startHour)
   } else {
     planStore.movePlan(payload.id, date, startHour)
   }
@@ -594,7 +661,7 @@ function resetPointerDrag() {
   pendingDrag = null
   dragging.value = null
   dragOverCell.value = null
-  dragOverTodoPool.value = false
+  dragOverPlazaPool.value = false
   scrollSpeed = { x: 0, y: 0 }
 
   if (autoScrollFrame !== null) {
@@ -671,22 +738,6 @@ onBeforeUnmount(() => {
   if (autoScrollFrame !== null) cancelAnimationFrame(autoScrollFrame)
 })
 
-// ---------- 添加日程（仅从待办清单排班） ----------
-
-/** 待办一键排班：直接排到今天 19:00，之后可在详情里改时间 */
-async function quickSchedule(todo) {
-  const targetDate = todayKey()
-  const created = planStore.scheduleFromTodo(todo.id, targetDate, 19)
-  if (!created) return
-
-  // 目标日期可能还没被渲染出来，补齐后滚动过去，保证能看到结果
-  await ensureDateRendered(targetDate)
-  await nextTick()
-  scrollToDate(targetDate)
-
-  MessagePlugin.success('已添加到排版计划')
-}
-
 // ---------- 日程详情（点卡片后从右侧滑出） ----------
 
 const detailVisible = ref(false)
@@ -757,8 +808,16 @@ function openDetail(planId) {
     closeDetail()
     return
   }
+  // 详情与日程广场面板同占右侧区域，互斥：开详情时先收广场
+  plazaOpen.value = false
   detailId.value = planId
   detailVisible.value = true
+}
+
+/** 从右侧展开日程广场面板；与详情面板互斥，先收起详情 */
+function openPlaza() {
+  closeDetail()
+  plazaOpen.value = true
 }
 
 function closeDetail() {
@@ -768,15 +827,6 @@ function closeDetail() {
 
 function detailToggleDone() {
   if (detailPlan.value) planStore.togglePlanDone(detailPlan.value.id)
-}
-
-function detailRollback() {
-  const plan = detailPlan.value
-  if (!plan) return
-
-  planStore.unschedulePlan(plan.id)
-  closeDetail()
-  if (isOnline.value) MessagePlugin.info(`「${plan.title}」已退回待办清单`)
 }
 
 function detailRemove() {
@@ -803,7 +853,21 @@ watch(
 
 <template>
   <div class="schedule">
-    <t-card :bordered="false" class="schedule__calendar-card">
+    <div class="schedule__main">
+      <div class="schedule__toolbar">
+        <span class="schedule__toolbar-hint">点“＋ 添加日程”打开日程广场，把日程拖到时间线上排班</span>
+        <div class="schedule__toolbar-actions">
+          <t-button theme="default" variant="outline" size="small" @click="openShare">
+            <template #icon><ShareIcon /></template>
+            分享
+          </t-button>
+          <t-button theme="primary" size="small" @click="openPlaza">
+            <template #icon><AddIcon /></template>
+            添加日程
+          </t-button>
+        </div>
+      </div>
+      <t-card :bordered="false" class="schedule__calendar-card">
       <div
         ref="calendarRef"
         class="calendar"
@@ -862,9 +926,9 @@ watch(
                     v-else-if="!plansAt(date, hour).length"
                     type="button"
                     class="calendar__add"
-                    title="展开待办清单，拖日程到此处排班"
-                    aria-label="展开待办清单"
-                    @click="todoOpen = true"
+                    title="打开日程广场，拖日程到此处排班"
+                    aria-label="打开日程广场"
+                    @click="openPlaza"
                   >
                     <AddIcon />
                   </button>
@@ -933,6 +997,7 @@ watch(
         </div>
       </div>
     </t-card>
+    </div>
 
     <!-- 日程详情：把日程表往左挤压，从右侧展开 -->
     <div class="detail-panel" :class="{ 'is-open': detailVisible }">
@@ -988,7 +1053,6 @@ watch(
               <t-button block variant="outline" @click="detailToggleDone">
                 {{ detailPlan.done ? '标记为未完成' : '标记为已完成' }}
               </t-button>
-              <t-button block variant="outline" @click="detailRollback">退回待办清单</t-button>
               <t-button block theme="danger" variant="outline" @click="detailRemove">
                 删除日程
               </t-button>
@@ -998,21 +1062,21 @@ watch(
       </div>
     </div>
 
-    <!-- 待办清单：与日程详情同款，从右侧展开并挤压日程表 -->
-    <div class="todo-panel" :class="{ 'is-open': todoOpen && !detailVisible }">
+    <!-- 日程广场：与日程详情同款，从右侧展开并挤压日程表（只做浏览与排班） -->
+    <div class="todo-panel" :class="{ 'is-open': plazaOpen && !detailVisible }">
       <div class="todo-panel__inner">
-        <div class="todo-dock__panel" :class="{ 'is-drop-target': dragOverTodoPool }">
+        <div class="todo-dock__panel" :class="{ 'is-drop-target': dragOverPlazaPool }">
           <div class="todo-dock__head">
             <div class="todo-dock__title">
-              <span>待办清单</span>
-              <t-tag size="small" variant="light">{{ planStore.todoCount }}</t-tag>
+              <span>日程广场</span>
+              <t-tag size="small" variant="light">{{ plazaStore.itemCount }}</t-tag>
             </div>
             <button
               type="button"
               class="todo-dock__close"
               title="收起"
-              aria-label="收起待办清单"
-              @click="todoOpen = false"
+              aria-label="收起日程广场"
+              @click="plazaOpen = false"
             >
               <CloseIcon />
             </button>
@@ -1020,11 +1084,11 @@ watch(
 
           <p class="todo-dock__hint">
             <DragMoveIcon />
-            拖到日历上任意位置即可排班；把计划拖回这里可以取消排班。
+            把日程拖到日历上任意位置即可排班；把计划拖回这里可以取消排班。
           </p>
 
           <div class="todo-dock__body">
-            <t-empty v-if="!planStore.todos.length" description="暂无待办，去日程广场添加">
+            <t-empty v-if="!plazaStore.itemCount" description="日程广场还没有可排的日程">
               <template #action>
                 <t-button
                   size="small"
@@ -1037,43 +1101,34 @@ watch(
               </template>
             </t-empty>
 
-            <div v-else class="todo-dock__list">
+            <div v-else class="plaza-list">
               <div
-                v-for="todo in planStore.todos"
-                :key="todo.id"
-                class="todo-chip"
-                :class="{ 'is-drag-source': dragging?.id === todo.id }"
-                @pointerdown="onTodoPointerDown($event, todo)"
+                v-for="collection in plazaCollections"
+                :key="collection.id"
+                class="plaza-group"
               >
-                <span
-                  class="todo-chip__bar"
-                  :style="{ backgroundColor: categoryColor(todo.category) }"
-                />
-                <div class="todo-chip__body">
-                  <div class="todo-chip__title">{{ todo.title }}</div>
-                  <div class="todo-chip__meta">
-                    <t-tag size="small" variant="light" :theme="levelTheme(todo.level)">
-                      {{ todo.level }}
-                    </t-tag>
-                    <span>{{ todo.category }}</span>
-                    <span>{{ todo.duration }} 分钟</span>
+                <div class="plaza-group__title">{{ collection.name }}</div>
+                <div
+                  v-for="item in collection.items"
+                  :key="item.id"
+                  class="todo-chip"
+                  :class="{ 'is-drag-source': dragging?.id === item.id }"
+                  @pointerdown="onPlazaPointerDown($event, item)"
+                >
+                  <span
+                    class="todo-chip__bar"
+                    :style="{ backgroundColor: categoryColor(item.category) }"
+                  />
+                  <div class="todo-chip__body">
+                    <div class="todo-chip__title">{{ item.title }}</div>
+                    <div class="todo-chip__meta">
+                      <t-tag size="small" variant="light" :theme="levelTheme(item.level)">
+                        {{ item.level }}
+                      </t-tag>
+                      <span>{{ item.category }}</span>
+                      <span>{{ item.duration }} 分钟</span>
+                    </div>
                   </div>
-                </div>
-                <div class="todo-chip__actions">
-                  <span
-                    class="todo-chip__action"
-                    title="直接排班"
-                    @click.stop="quickSchedule(todo)"
-                  >
-                    <CalendarIcon />
-                  </span>
-                  <span
-                    class="todo-chip__action todo-chip__action--danger"
-                    title="移出待办"
-                    @click.stop="planStore.removeTodo(todo.id)"
-                  >
-                    <DeleteIcon />
-                  </span>
                 </div>
               </div>
             </div>
@@ -1081,6 +1136,33 @@ watch(
         </div>
       </div>
     </div>
+
+    <!-- 分享弹窗：选择可查看的日期范围，生成只读链接 -->
+    <t-dialog
+      v-model:visible="shareVisible"
+      header="分享日程表"
+      width="460px"
+      :footer="false"
+    >
+      <div class="share-form">
+        <p class="share-form__hint">选择允许查看的日期范围，生成一个只读链接；对方只能看到这段时间内的日程，无法编辑。</p>
+        <div class="share-form__row">
+          <label class="share-form__label">开始日期</label>
+          <t-date-picker v-model="shareStart" clearable style="width: 100%" />
+        </div>
+        <div class="share-form__row">
+          <label class="share-form__label">结束日期</label>
+          <t-date-picker v-model="shareEnd" clearable style="width: 100%" />
+        </div>
+        <t-button theme="primary" block :loading="shareSubmitting" @click="generateShare">
+          生成链接
+        </t-button>
+        <div v-if="shareUrl" class="share-form__result">
+          <t-input :value="shareUrl" readonly />
+          <t-button theme="default" variant="outline" @click="copyShare">复制</t-button>
+        </div>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -1093,9 +1175,69 @@ watch(
   height: calc(100vh - 128px);
 }
 
+.schedule__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.schedule__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.schedule__toolbar-hint {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.schedule__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.share-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.share-form__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+}
+
+.share-form__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.share-form__label {
+  width: 64px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+}
+
+.share-form__result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .schedule__calendar-card {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -1411,7 +1553,7 @@ watch(
   background-color: rgb(0 82 217 / 28%);
 }
 
-/* ---------- 待办清单 ---------- */
+/* ---------- 日程广场面板 ---------- */
 
 /* 与日程详情同款：外层过渡宽度把日历往左挤，内层固定宽度避免内容被压变形 */
 .todo-panel {
@@ -1531,6 +1673,25 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.plaza-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plaza-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plaza-group__title {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--td-text-color-secondary);
 }
 
 .todo-chip {

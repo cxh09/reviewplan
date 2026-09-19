@@ -133,3 +133,20 @@ export function putSnapshot(baseUrl, token, data, rev, { keepalive = false } = {
     keepalive,
   })
 }
+
+/**
+ * 创建分享链接：登记一个日期范围，返回随机 code。
+ * 需要访问令牌（走同源的 /api/shares）。
+ */
+export function createShare(baseUrl, token, dateStart, dateEnd) {
+  return request(baseUrl, '/api/shares', {
+    method: 'POST',
+    body: { dateStart, dateEnd },
+    token,
+  })
+}
+
+/** 公开读取分享：不带令牌，返回 { dateStart, dateEnd, plans } */
+export function fetchShare(baseUrl, code) {
+  return request(baseUrl, `/api/share/${encodeURIComponent(code)}`)
+}

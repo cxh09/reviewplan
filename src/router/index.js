@@ -35,6 +35,12 @@ const routes = [
     ],
   },
   {
+    path: '/share/:code',
+    name: 'share',
+    component: () => import('@/views/ShareView.vue'),
+    meta: { title: '日程分享' },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('@/views/NotFoundView.vue'),

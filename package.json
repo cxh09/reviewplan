@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "面向高考复习的日程规划：倒计时 + 待办清单 + 拖拽排班",
+  "description": "面向高考复习的日程规划：倒计时 + 日程广场 + 拖拽排班",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

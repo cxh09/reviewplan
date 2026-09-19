@@ -62,7 +62,7 @@ function mergeTombstones(localList, remoteList, now) {
 }
 
 /**
- * 合并一组按 id 唯一的条目（待办 / 计划 / 合集 / 合集里的日程通用）。
+ * 合并一组按 id 唯一的条目（计划 / 合集 / 合集里的日程通用）。
  * 删除时间晚于最后一次修改的条目会被真正丢弃。
  */
 function mergeEntities(localList, remoteList, tombstoneAt) {
@@ -126,7 +126,6 @@ export function mergeSnapshots(local, remote, now = Date.now()) {
 
   return {
     ...mergeGaokaoDate(local, remote),
-    todos: mergeEntities(local?.todos, remote?.todos, tombstoneAt),
     plans: mergeEntities(local?.plans, remote?.plans, tombstoneAt),
     collections: mergeCollections(local?.collections, remote?.collections, tombstoneAt),
     deleted,

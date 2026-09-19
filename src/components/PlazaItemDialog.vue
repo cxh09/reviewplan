@@ -22,7 +22,6 @@ const isEdit = computed(() => Boolean(props.item))
 const rules = {
   title: [
     { required: true, message: '请输入日程标题', type: 'error', trigger: 'blur' },
-    { max: 30, message: '标题不要超过 30 个字', type: 'error', trigger: 'blur' },
   ],
   link: [{ url: true, message: '看起来不是有效的链接', type: 'warning', trigger: 'blur' }],
 }
