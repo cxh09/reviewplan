@@ -7,6 +7,10 @@ dist-ssr
 # 部署打包产物
 *.tar.gz
 
+# 独立子仓库（移动端 / 服务端，各自拥有单独的 Git 仓库）
+mobile/
+server/
+
 # 日志
 logs
 *.log
