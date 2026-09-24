@@ -130,15 +130,16 @@ function rowHeight(date) {
 const rangeLabel = computed(() => {
   if (!dateStart.value || !dateEnd.value) return ''
   if (dateStart.value === dateEnd.value) return formatMD(dateStart.value)
-  return `${formatMD(dateStart.value)} - ${formatMD(dateEnd.value)}`
+  return `${formatMD(dateStart.value)}~${formatMD(dateEnd.value)}`
 })
 </script>
 
 <template>
   <div class="share">
     <header class="share__head">
-      <div class="share__brand">复习清单 · 共享日程</div>
-      <div v-if="!loading && !error" class="share__range">{{ rangeLabel }}</div>
+      <div class="share__brand">
+        复习日程<template v-if="!loading && !error && rangeLabel">（{{ rangeLabel }}）</template>
+      </div>
       <div v-if="!loading && !error && profile" class="share__author">
         <img v-if="profile.avatar" class="share__author-avatar" :src="profile.avatar" alt="头像" />
         <span>由 {{ profile.name }} 分享</span>
@@ -229,7 +230,7 @@ const rangeLabel = computed(() => {
 
 .share__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--td-component-stroke);
@@ -239,11 +240,6 @@ const rangeLabel = computed(() => {
 .share__brand {
   font-size: 16px;
   font-weight: 700;
-}
-
-.share__range {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
 }
 
 .share__author {
