@@ -88,6 +88,8 @@ export const usePlanStore = defineStore('plan', () => {
   const plans = ref([])
   /** 高考日期自身的修改时间：合并两端快照时用来判断该用谁的日期 */
   const gaokaoDateUpdatedAt = ref(0)
+  /** 分享署名用的作者资料：头像为客户端压缩后的 dataURL；updatedAt 供多端合并 */
+  const profile = ref({ name: '', avatar: '', updatedAt: 0 })
 
   // ---------- 派生数据 ----------
 
@@ -263,6 +265,14 @@ export const usePlanStore = defineStore('plan', () => {
     gaokaoDateUpdatedAt.value = Date.now()
   }
 
+  /** 更新作者资料（用户名 / 头像）；头像传空字符串表示不改动当前头像 */
+  function setProfile({ name, avatar } = {}) {
+    if (!ensureWritable()) return
+    if (name !== undefined) profile.value.name = `${name}`.trim().slice(0, 24)
+    if (avatar) profile.value.avatar = avatar
+    profile.value.updatedAt = Date.now()
+  }
+
   function exportData() {
     return JSON.stringify(
       {
@@ -271,6 +281,7 @@ export const usePlanStore = defineStore('plan', () => {
         gaokaoDate: gaokaoDate.value,
         gaokaoDateUpdatedAt: gaokaoDateUpdatedAt.value,
         plans: plans.value,
+        profile: profile.value,
         deleted: activeTombstones(),
       },
       null,
@@ -299,6 +310,14 @@ export const usePlanStore = defineStore('plan', () => {
       gaokaoDateUpdatedAt.value = toNumber(data.gaokaoDateUpdatedAt, 0)
     }
     if (Array.isArray(data.deleted)) setTombstones(data.deleted)
+    // 资料是随快照同步的标量对象，缺字段时按空处理，不会写进脏数据
+    if (data.profile && typeof data.profile === 'object') {
+      profile.value = {
+        name: `${data.profile.name || ''}`,
+        avatar: `${data.profile.avatar || ''}`,
+        updatedAt: toNumber(data.profile.updatedAt, 0),
+      }
+    }
   }
 
   function resetAll() {
@@ -315,6 +334,7 @@ export const usePlanStore = defineStore('plan', () => {
     gaokaoDate,
     gaokaoDateUpdatedAt,
     plans,
+    profile,
     // getters
     daysToGaokao,
     planCount,
@@ -332,6 +352,7 @@ export const usePlanStore = defineStore('plan', () => {
     togglePlanDone,
     removePlan,
     setGaokaoDate,
+    setProfile,
     exportData,
     importData,
     resetAll,

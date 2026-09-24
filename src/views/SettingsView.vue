@@ -34,6 +34,74 @@ const themeModel = computed({
   set: (value) => appStore.setTheme(value),
 })
 
+// ---------- 个人资料（分享署名） ----------
+
+const avatarInput = ref(null)
+const profileName = ref(planStore.profile.name)
+const profileAvatar = ref(planStore.profile.avatar)
+
+// 云端合并回来时同步到输入框（不覆盖用户正在编辑的内容时由 store 单向驱动）
+watch(
+  () => planStore.profile,
+  (value) => {
+    profileName.value = value.name
+    profileAvatar.value = value.avatar
+  },
+)
+
+/** 把所选图片居中裁成正方形并压缩成 JPEG dataURL（约 140×140） */
+function compressAvatar(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const size = 140
+      const canvas = document.createElement('canvas')
+      canvas.width = size
+      canvas.height = size
+      const ctx = canvas.getContext('2d')
+      const min = Math.min(img.width, img.height)
+      const sx = (img.width - min) / 2
+      const sy = (img.height - min) / 2
+      ctx.drawImage(img, sx, sy, min, min, 0, 0, size, size)
+      resolve(canvas.toDataURL('image/jpeg', 0.8))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('图片加载失败'))
+    }
+    img.src = url
+  })
+}
+
+function triggerAvatarPick() {
+  avatarInput.value?.click()
+}
+
+async function handleAvatarChange(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    const dataUrl = await compressAvatar(file)
+    // 压缩后仍异常大（极端尺寸 / 高熵图片）就拒绝，避免快照膨胀
+    if (dataUrl.length > 200 * 1024) {
+      MessagePlugin.warning('头像过大，请换一张较小的图片')
+      return
+    }
+    profileAvatar.value = dataUrl
+  } catch {
+    MessagePlugin.error('图片处理失败，请换一张图片')
+  } finally {
+    event.target.value = ''
+  }
+}
+
+function saveProfile() {
+  planStore.setProfile({ name: profileName.value, avatar: profileAvatar.value })
+  if (syncStore.isOnline) MessagePlugin.success('资料已保存')
+}
+
 const daysText = computed(() => {
   const days = planStore.daysToGaokao
   if (days > 0) return `距离高考还有 ${days} 天`
@@ -258,6 +326,46 @@ function confirmReset() {
 
 <template>
   <div class="settings">
+    <t-card :bordered="false" class="settings__card">
+      <template #title>
+        <span class="settings__title">个人资料</span>
+      </template>
+
+      <div class="profile">
+        <div class="profile__avatar" role="button" tabindex="0" @click="triggerAvatarPick">
+          <img v-if="profileAvatar" :src="profileAvatar" alt="头像" />
+          <span v-else>设置<br />头像</span>
+        </div>
+        <div class="profile__form">
+          <t-input
+            v-model="profileName"
+            class="profile__input"
+            placeholder="用户名（用于分享页署名）"
+            clearable
+            :maxlength="24"
+          />
+          <p class="profile__hint">
+            分享页顶部会显示“由 用户名 分享”。用户名与头像会随数据同步到各端，离线时无法保存。
+          </p>
+          <div class="settings__actions">
+            <t-button theme="primary" :disabled="!syncStore.isOnline" @click="saveProfile">
+              保存资料
+            </t-button>
+            <t-button theme="default" variant="outline" @click="triggerAvatarPick">
+              选择头像
+            </t-button>
+          </div>
+        </div>
+        <input
+          ref="avatarInput"
+          type="file"
+          accept="image/*"
+          class="settings__file"
+          @change="handleAvatarChange"
+        />
+      </div>
+    </t-card>
+
     <t-card :bordered="false" class="settings__card">
       <template #title>
         <span class="settings__title">高考设置</span>
@@ -612,6 +720,56 @@ function confirmReset() {
 
 .settings__note {
   margin: 16px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--td-text-color-placeholder);
+}
+
+.profile {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.profile__avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  border: 1px solid var(--td-component-stroke);
+  background-color: var(--td-bg-color-secondarycontainer);
+  cursor: pointer;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+}
+
+.profile__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile__form {
+  flex: 1;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile__input {
+  max-width: 320px;
+}
+
+.profile__hint {
+  margin: 0;
   font-size: 12px;
   line-height: 1.7;
   color: var(--td-text-color-placeholder);

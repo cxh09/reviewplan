@@ -22,6 +22,8 @@ const error = ref('')
 const dateStart = ref('')
 const dateEnd = ref('')
 const plans = ref([])
+/** 分享者资料（由服务端随快照实时透出，旧数据为 null） */
+const profile = ref(null)
 
 async function load() {
   const code = route.params.code
@@ -36,6 +38,7 @@ async function load() {
     dateStart.value = res.dateStart
     dateEnd.value = res.dateEnd
     plans.value = Array.isArray(res.plans) ? res.plans : []
+    profile.value = res.profile && res.profile.name ? res.profile : null
   } catch (err) {
     error.value = err?.message || '分享链接不存在或已失效'
   } finally {
@@ -136,6 +139,10 @@ const rangeLabel = computed(() => {
     <header class="share__head">
       <div class="share__brand">复习清单 · 共享日程</div>
       <div v-if="!loading && !error" class="share__range">{{ rangeLabel }}</div>
+      <div v-if="!loading && !error && profile" class="share__author">
+        <img v-if="profile.avatar" class="share__author-avatar" :src="profile.avatar" alt="头像" />
+        <span>由 {{ profile.name }} 分享</span>
+      </div>
     </header>
 
     <main class="share__body">
@@ -237,6 +244,23 @@ const rangeLabel = computed(() => {
 .share__range {
   font-size: 13px;
   color: var(--td-text-color-secondary);
+}
+
+.share__author {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+}
+
+.share__author-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--td-component-stroke);
 }
 
 .share__body {

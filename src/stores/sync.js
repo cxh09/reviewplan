@@ -141,6 +141,7 @@ export const useSyncStore = defineStore('sync', () => {
       gaokaoDate: planStore.gaokaoDate,
       gaokaoDateUpdatedAt: planStore.gaokaoDateUpdatedAt,
       plans: JSON.parse(JSON.stringify(planStore.plans)),
+      profile: JSON.parse(JSON.stringify(planStore.profile)),
       collections: plazaStore.exportData(),
       deleted: activeTombstones(),
     }
@@ -157,6 +158,7 @@ export const useSyncStore = defineStore('sync', () => {
         gaokaoDate: data?.gaokaoDate,
         gaokaoDateUpdatedAt: data?.gaokaoDateUpdatedAt,
         plans: data?.plans,
+        profile: data?.profile,
         deleted: data?.deleted,
       })
       if (Array.isArray(data?.collections)) plazaStore.importData(data.collections)
@@ -503,6 +505,7 @@ export const useSyncStore = defineStore('sync', () => {
     [
       () => planStore.gaokaoDate,
       () => planStore.plans,
+      () => planStore.profile,
       () => plazaStore.collections,
     ],
     schedulePush,

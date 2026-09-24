@@ -114,6 +114,20 @@ function mergeGaokaoDate(local, remote) {
     : { gaokaoDate: remoteDate, gaokaoDateUpdatedAt: remoteAt }
 }
 
+/** 作者资料是个标量对象，同样按 updatedAt 取新的；一方没有时用另一方 */
+function mergeProfile(local, remote) {
+  const pick = (p) =>
+    p && typeof p === 'object'
+      ? { name: `${p.name || ''}`, avatar: `${p.avatar || ''}`, updatedAt: Number(p.updatedAt) || 0 }
+      : null
+  const localProfile = pick(local?.profile)
+  const remoteProfile = pick(remote?.profile)
+
+  if (!remoteProfile) return localProfile || { name: '', avatar: '', updatedAt: 0 }
+  if (!localProfile) return remoteProfile
+  return localProfile.updatedAt > remoteProfile.updatedAt ? localProfile : remoteProfile
+}
+
 /**
  * 合并本地与云端两份快照。
  * @param {object} local 本地快照（形如 buildPayload 的结果）
@@ -126,6 +140,7 @@ export function mergeSnapshots(local, remote, now = Date.now()) {
 
   return {
     ...mergeGaokaoDate(local, remote),
+    profile: mergeProfile(local, remote),
     plans: mergeEntities(local?.plans, remote?.plans, tombstoneAt),
     collections: mergeCollections(local?.collections, remote?.collections, tombstoneAt),
     deleted,
