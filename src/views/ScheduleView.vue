@@ -14,7 +14,7 @@ import { categoryColor, levelTheme } from '@/data/plaza'
 import { DEFAULT_SLOT_MINUTES, TIMELINE_HOURS, usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
 import { useSyncStore } from '@/stores/sync'
-import { createShare } from '@/utils/api'
+import { createShare, uploadFile } from '@/utils/api'
 import { isOnline } from '@/utils/connection'
 import {
   addDays,
@@ -805,6 +805,9 @@ function createDetailForm(plan) {
     duration: Number(plan.duration) || DEFAULT_SLOT_MINUTES,
     note: plan.note || '',
     link: plan.link || '',
+    doneNote: plan.doneNote || '',
+    doneImages: [...(plan.doneImages || [])],
+    doneFiles: [...(plan.doneFiles || [])],
   }
 }
 
@@ -879,6 +882,214 @@ function detailRemove() {
   planStore.removePlan(plan.id)
   closeDetail()
   if (isOnline.value) MessagePlugin.success(`「${plan.title}」已删除`)
+}
+
+// ---------- 完成详情：文字 + 图片 + 附件（文件传服务端，计划只存 URL） ----------
+
+const detailImageInput = ref(null)
+const detailFileInput = ref(null)
+/** 当前正在上传的类型：image | file | ''，用于按钮 loading */
+const detailUploading = ref('')
+/** 图片预览：默认展示 ≤1MB 的压缩版，点「查看原图」才加载原图 */
+const imageViewer = ref(null)
+const viewerOriginal = ref(false)
+
+const MAX_DONE_IMAGES = 9
+const MAX_DONE_FILES = 9
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+/** 预览图目标体积：1MB */
+const PREVIEW_MAX_BYTES = 1024 * 1024
+
+/** 计划块右下角小徽标：已完成且填了任意一项完成详情 */
+function hasCompletion(plan) {
+  return Boolean(plan.done && (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length))
+}
+
+/** 打开图片预览：默认看压缩版，每次打开重置回预览态 */
+function openImageViewer(img) {
+  imageViewer.value = img
+  viewerOriginal.value = false
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(`${reader.result}`.split(',')[1] || '')
+    reader.onerror = () => reject(new Error('读取文件失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+/** 服务端允许直传的图片 mime（原图命中这些类型才保留原图） */
+const IMAGE_MIME_SET = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+
+/** 把图片压到 ≤1MB 的预览版 base64：分辨率与质量逐档下调，取第一个达标的档位 */
+function compressPreviewToJpegBase64(file) {
+  const stages = [
+    { edge: 1920, quality: 0.85 },
+    { edge: 1600, quality: 0.75 },
+    { edge: 1280, quality: 0.7 },
+    { edge: 1024, quality: 0.6 },
+    { edge: 800, quality: 0.5 },
+  ]
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      let fallback = ''
+      for (const stage of stages) {
+        const scale = Math.min(1, stage.edge / Math.max(img.width, img.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round(img.width * scale))
+        canvas.height = Math.max(1, Math.round(img.height * scale))
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+        const base64 = `${canvas.toDataURL('image/jpeg', stage.quality)}`.split(',')[1] || ''
+        // base64 还原字节数 ≈ length * 3/4
+        if (base64 && base64.length * 0.75 <= PREVIEW_MAX_BYTES) {
+          resolve(base64)
+          return
+        }
+        if (!fallback) fallback = base64
+      }
+      // 极端高熵图片兜底：用首档（最大分辨率）的压缩结果，至少比原图小
+      if (fallback) resolve(fallback)
+      else reject(new Error('图片压缩失败'))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('图片加载失败'))
+    }
+    img.src = url
+  })
+}
+
+/** 附件没有可靠 mime 时按扩展名兜底（与服务端白名单对齐） */
+const EXT_MIME = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  zip: 'application/zip',
+}
+
+async function onDetailImagesPicked(event) {
+  const files = [...(event.target.files || [])]
+  event.target.value = ''
+  const form = detailForm.value
+  if (!form || !files.length) return
+
+  if (form.doneImages.length + files.length > MAX_DONE_IMAGES) {
+    MessagePlugin.warning(`最多 ${MAX_DONE_IMAGES} 张图片`)
+    return
+  }
+  detailUploading.value = 'image'
+  try {
+    for (const file of files) {
+      if (!/^image\//.test(file.type)) {
+        MessagePlugin.error(`「${file.name}」不是图片`)
+        continue
+      }
+      const ext = `${file.name}`.split('.').pop()?.toLowerCase() || ''
+      const originalMime = IMAGE_MIME_SET.has(EXT_MIME[ext]) ? EXT_MIME[ext] : file.type
+
+      // ≤1MB 且类型受支持：原图本身就是预览版，只传一份
+      if (file.size <= PREVIEW_MAX_BYTES && IMAGE_MIME_SET.has(originalMime)) {
+        const res = await uploadFile(syncStore.normalizedUrl, syncStore.accessToken, {
+          name: file.name,
+          mime: originalMime,
+          base64: await fileToBase64(file),
+        })
+        if (res?.url) form.doneImages.push({ name: file.name.slice(0, 60), url: res.url })
+        continue
+      }
+
+      // 先压 ≤1MB 预览版；原图在支持范围内且 ≤15MB 才保留，失败则退回只存预览版
+      const previewBase64 = await compressPreviewToJpegBase64(file)
+      let originalUrl = ''
+      if (IMAGE_MIME_SET.has(originalMime) && file.size <= MAX_UPLOAD_BYTES) {
+        try {
+          const res = await uploadFile(syncStore.normalizedUrl, syncStore.accessToken, {
+            name: file.name,
+            mime: originalMime,
+            base64: await fileToBase64(file),
+          })
+          originalUrl = `${res?.url ?? ''}`
+        } catch {
+          originalUrl = ''
+        }
+      }
+      const previewRes = await uploadFile(syncStore.normalizedUrl, syncStore.accessToken, {
+        name: file.name,
+        mime: 'image/jpeg',
+        base64: previewBase64,
+      })
+      if (!previewRes?.url) continue
+      const entry = { name: file.name.slice(0, 60), url: originalUrl || previewRes.url }
+      if (originalUrl && originalUrl !== previewRes.url) entry.preview = previewRes.url
+      form.doneImages.push(entry)
+    }
+  } catch (err) {
+    MessagePlugin.error(err?.message || '图片上传失败')
+  } finally {
+    detailUploading.value = ''
+  }
+}
+
+async function onDetailFilesPicked(event) {
+  const files = [...(event.target.files || [])]
+  event.target.value = ''
+  const form = detailForm.value
+  if (!form || !files.length) return
+
+  if (form.doneFiles.length + files.length > MAX_DONE_FILES) {
+    MessagePlugin.warning(`最多 ${MAX_DONE_FILES} 个附件`)
+    return
+  }
+  detailUploading.value = 'file'
+  try {
+    for (const file of files) {
+      if (file.size > MAX_UPLOAD_BYTES) {
+        MessagePlugin.error(`「${file.name}」超过 15MB 上限`)
+        continue
+      }
+      const ext = `${file.name}`.split('.').pop()?.toLowerCase() || ''
+      const mime = file.type || EXT_MIME[ext] || ''
+      if (!EXT_MIME[ext] && !/^image\//.test(mime)) {
+        MessagePlugin.error(`「${file.name}」类型不支持（可用：图片/PDF/Office/文本/zip）`)
+        continue
+      }
+      const base64 = await fileToBase64(file)
+      const res = await uploadFile(syncStore.normalizedUrl, syncStore.accessToken, {
+        name: file.name,
+        mime,
+        base64,
+      })
+      if (res?.url) form.doneFiles.push({ name: file.name.slice(0, 60), url: res.url })
+    }
+  } catch (err) {
+    MessagePlugin.error(err?.message || '附件上传失败')
+  } finally {
+    detailUploading.value = ''
+  }
+}
+
+function removeDetailImage(index) {
+  detailForm.value?.doneImages.splice(index, 1)
+}
+
+function removeDetailFile(index) {
+  detailForm.value?.doneFiles.splice(index, 1)
 }
 
 /** 在详情里改了日期后，保证那一日已经渲染出来并滚动过去 */
@@ -1015,6 +1226,12 @@ watch(
                         </span>
                       </div>
                     </div>
+                    <span
+                      v-if="hasCompletion(block.plan)"
+                      class="plan-block__evidence"
+                      title="有完成详情，点击查看"
+                      >📎</span
+                    >
 
                     <span
                       class="plan-block__handle plan-block__handle--start"
@@ -1102,6 +1319,97 @@ watch(
                 <LinkIcon />
                 打开链接
               </a>
+            </div>
+
+            <!-- 完成详情：标记完成后提交文字 / 图片 / 附件说明完成情况 -->
+            <div v-if="detailPlan && detailPlan.done" class="form-item completion">
+              <label class="form-label">完成详情</label>
+              <t-textarea
+                v-model="detailForm.doneNote"
+                placeholder="说明一下完成情况，选填"
+                :autosize="{ minRows: 3, maxRows: 6 }"
+              />
+              <div v-if="detailForm.doneImages.length" class="completion__images">
+                <div
+                  v-for="(img, index) in detailForm.doneImages"
+                  :key="img.url"
+                  class="completion__thumb"
+                >
+                  <img
+                    :src="img.preview || img.url"
+                    :alt="img.name"
+                    @click="openImageViewer(img)"
+                  />
+                  <button
+                    type="button"
+                    class="completion__remove"
+                    title="删除图片"
+                    @click="removeDetailImage(index)"
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+              <div v-if="detailForm.doneFiles.length" class="completion__files">
+                <div
+                  v-for="(file, index) in detailForm.doneFiles"
+                  :key="file.url"
+                  class="completion__file"
+                >
+                  <a
+                    :href="file.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="completion__file-link"
+                  >
+                    <LinkIcon />
+                    {{ file.name || file.url.split('/').pop() }}
+                  </a>
+                  <button
+                    type="button"
+                    class="completion__remove"
+                    title="删除附件"
+                    @click="removeDetailFile(index)"
+                  >
+                    <CloseIcon />
+                  </button>
+                </div>
+              </div>
+              <div class="completion__actions">
+                <t-button
+                  size="small"
+                  variant="outline"
+                  theme="primary"
+                  :loading="detailUploading === 'image'"
+                  :disabled="detailForm.doneImages.length >= 9"
+                  @click="detailImageInput.click()"
+                >
+                  添加图片
+                </t-button>
+                <t-button
+                  size="small"
+                  variant="outline"
+                  :loading="detailUploading === 'file'"
+                  :disabled="detailForm.doneFiles.length >= 9"
+                  @click="detailFileInput.click()"
+                >
+                  添加附件
+                </t-button>
+              </div>
+              <input
+                ref="detailImageInput"
+                type="file"
+                accept="image/*"
+                multiple
+                class="detail__hidden-input"
+                @change="onDetailImagesPicked"
+              />
+              <input
+                ref="detailFileInput"
+                type="file"
+                class="detail__hidden-input"
+                @change="onDetailFilesPicked"
+              />
             </div>
 
             <div class="detail__actions">
@@ -1226,6 +1534,23 @@ watch(
         </div>
       </div>
     </t-dialog>
+
+    <!-- 完成详情图片预览：默认展示压缩版，点「查看原图」才加载原图；点背景关闭 -->
+    <div v-if="imageViewer" class="image-viewer" @click="imageViewer = null">
+      <img
+        :src="viewerOriginal ? imageViewer.url : imageViewer.preview || imageViewer.url"
+        alt="图片预览"
+        @click.stop
+      />
+      <button
+        v-if="imageViewer.preview && imageViewer.preview !== imageViewer.url && !viewerOriginal"
+        type="button"
+        class="image-viewer__original"
+        @click.stop="viewerOriginal = true"
+      >
+        查看原图
+      </button>
+    </div>
   </div>
 </template>
 
@@ -2036,5 +2361,140 @@ watch(
     flex-direction: column;
     gap: 0;
   }
+}
+
+/* ---------- 完成详情 ---------- */
+
+.detail__hidden-input {
+  display: none;
+}
+
+.completion__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.completion__thumb {
+  position: relative;
+  width: 72px;
+  height: 72px;
+}
+
+.completion__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--td-radius-medium);
+  border: 1px solid var(--td-component-stroke);
+  cursor: zoom-in;
+  display: block;
+}
+
+.completion__remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: rgb(0 0 0 / 55%);
+  color: #fff;
+  cursor: pointer;
+}
+
+.completion__remove :deep(svg) {
+  width: 12px;
+  height: 12px;
+}
+
+.completion__files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.completion__file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-medium);
+  background-color: var(--td-bg-color-secondarycontainer);
+}
+
+.completion__file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--td-brand-color);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completion__file .completion__remove {
+  position: static;
+  flex-shrink: 0;
+}
+
+.completion__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.plan-block__evidence {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background-color: rgb(0 0 0 / 72%);
+  cursor: zoom-out;
+}
+
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--td-radius-medium);
+  cursor: default;
+}
+
+.image-viewer__original {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  border: none;
+  border-radius: 999px;
+  background-color: rgb(255 255 255 / 90%);
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  cursor: pointer;
 }
 </style>

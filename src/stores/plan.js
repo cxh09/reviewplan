@@ -4,12 +4,7 @@ import { defineStore } from 'pinia'
 import { ensureWritable } from '@/utils/connection'
 import { addDays, diffDays, parseDateKey, todayKey, toDateKey } from '@/utils/date'
 import { createId } from '@/utils/id'
-import {
-  activeTombstones,
-  markDeleted,
-  markDeletedMany,
-  setTombstones,
-} from '@/utils/tombstone'
+import { activeTombstones, markDeleted, markDeletedMany, setTombstones } from '@/utils/tombstone'
 import { sanitizeLink } from '@/utils/url'
 
 /**
@@ -52,6 +47,23 @@ function isValidDateKey(key) {
   return toDateKey(parseDateKey(key)) === key
 }
 
+/** 完成详情的文件引用：只认服务端 /uploads/ 下的随机文件名，其余丢弃；preview 为压缩预览图 */
+function sanitizeFileRef(ref) {
+  if (!ref || typeof ref !== 'object') return null
+  const url = `${ref.url ?? ''}`
+  if (!/^\/uploads\/[\w.-]+$/.test(url)) return null
+  const preview = `${ref.preview ?? ''}`
+  const out = { name: `${ref.name ?? ''}`.slice(0, 120), url }
+  if (/^\/uploads\/[\w.-]+$/.test(preview)) out.preview = preview
+  return out
+}
+
+/** 完成详情的图片 / 附件列表：逐条清洗，最多 9 项 */
+function sanitizeFileRefs(list) {
+  if (!Array.isArray(list)) return []
+  return list.map(sanitizeFileRef).filter(Boolean).slice(0, 9)
+}
+
 /** 兼容旧数据与导入数据：补齐缺失字段并夹回合法范围 */
 function normalizePlan(raw) {
   return {
@@ -72,6 +84,10 @@ function normalizePlan(raw) {
     startHour: clamp(toNumber(raw?.startHour, FIRST_HOUR), FIRST_HOUR, END_HOUR - 0.25),
     note: raw?.note || '',
     done: Boolean(raw?.done),
+    // 完成详情：说明文字 + 图片 / 附件引用（文件存服务端，这里只存 URL）
+    doneNote: `${raw?.doneNote ?? ''}`.slice(0, 2000),
+    doneImages: sanitizeFileRefs(raw?.doneImages),
+    doneFiles: sanitizeFileRefs(raw?.doneFiles),
   }
 }
 
@@ -157,6 +173,9 @@ export const usePlanStore = defineStore('plan', () => {
       startHour,
       note,
       done: false,
+      doneNote: '',
+      doneImages: [],
+      doneFiles: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
@@ -237,6 +256,9 @@ export const usePlanStore = defineStore('plan', () => {
         clamp(toNumber(patch.duration, plan.duration), MIN_DURATION, MAX_DURATION),
       )
     }
+    if (patch.doneNote !== undefined) plan.doneNote = `${patch.doneNote ?? ''}`.slice(0, 2000)
+    if (Array.isArray(patch.doneImages)) plan.doneImages = sanitizeFileRefs(patch.doneImages)
+    if (Array.isArray(patch.doneFiles)) plan.doneFiles = sanitizeFileRefs(patch.doneFiles)
 
     plan.updatedAt = Date.now()
     return plan

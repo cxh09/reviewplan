@@ -160,6 +160,27 @@ const rangeLabel = computed(() => {
   if (dateStart.value === dateEnd.value) return formatMD(dateStart.value)
   return `${formatMD(dateStart.value)}~${formatMD(dateEnd.value)}`
 })
+
+// ---------- 完成详情：点已完成的块弹只读弹窗 ----------
+
+/** 当前弹窗展示的计划（null 关闭） */
+const completionPlan = ref(null)
+/** 图片预览：默认展示 ≤1MB 压缩版，点「查看原图」才加载原图 */
+const viewerImage = ref(null)
+const viewerOriginal = ref(false)
+
+function hasCompletion(plan) {
+  return Boolean(plan.done && (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length))
+}
+
+function openCompletion(plan) {
+  if (hasCompletion(plan)) completionPlan.value = plan
+}
+
+function openViewer(img) {
+  viewerImage.value = img
+  viewerOriginal.value = false
+}
 </script>
 
 <template>
@@ -217,7 +238,10 @@ const rangeLabel = computed(() => {
                   v-for="block in dayLayout(date).blocks"
                   :key="`${date}-${block.plan.title}-${block.start}`"
                   class="plan-block"
-                  :class="{ 'is-done': block.plan.done }"
+                  :class="{
+                    'is-done': block.plan.done,
+                    'has-completion': hasCompletion(block.plan),
+                  }"
                   :style="{
                     left: `${block.left}%`,
                     width: `${block.width}%`,
@@ -225,6 +249,7 @@ const rangeLabel = computed(() => {
                     height: `${LANE_HEIGHT - 8}px`,
                     borderLeftColor: categoryColor(block.plan.category),
                   }"
+                  @click="openCompletion(block.plan)"
                 >
                   <div class="plan-block__main">
                     <div class="plan-block__title" :title="block.plan.title">
@@ -238,6 +263,7 @@ const rangeLabel = computed(() => {
                       </span>
                     </div>
                   </div>
+                  <span v-if="hasCompletion(block.plan)" class="plan-block__evidence">📎</span>
                 </div>
               </div>
             </div>
@@ -247,6 +273,63 @@ const rangeLabel = computed(() => {
     </main>
 
     <footer class="share__foot">本页面为只读分享，内容随作者的最新日程实时更新。</footer>
+
+    <!-- 完成详情只读弹窗：文字 + 图片（点击放大）+ 附件直链 -->
+    <div v-if="completionPlan" class="completion-dialog" @click.self="completionPlan = null">
+      <div class="completion-card">
+        <div class="completion-card__head">
+          <span class="completion-card__title">完成详情 · {{ completionPlan.title }}</span>
+          <button
+            type="button"
+            class="completion-card__close"
+            aria-label="关闭"
+            @click="completionPlan = null"
+          >
+            ×
+          </button>
+        </div>
+        <p v-if="completionPlan.doneNote" class="completion-card__note">
+          {{ completionPlan.doneNote }}
+        </p>
+        <div v-if="completionPlan.doneImages?.length" class="completion-card__images">
+          <img
+            v-for="img in completionPlan.doneImages"
+            :key="img.url"
+            :src="img.preview || img.url"
+            :alt="img.name"
+            @click="openViewer(img)"
+          />
+        </div>
+        <div v-if="completionPlan.doneFiles?.length" class="completion-card__files">
+          <a
+            v-for="file in completionPlan.doneFiles"
+            :key="file.url"
+            :href="file.url"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            📎 {{ file.name || file.url.split('/').pop() }}
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 图片预览：默认展示压缩版，点「查看原图」才加载原图 -->
+    <div v-if="viewerImage" class="image-viewer" @click="viewerImage = null">
+      <img
+        :src="viewerOriginal ? viewerImage.url : viewerImage.preview || viewerImage.url"
+        alt="图片预览"
+        @click.stop
+      />
+      <button
+        v-if="viewerImage.preview && viewerImage.preview !== viewerImage.url && !viewerOriginal"
+        type="button"
+        class="image-viewer__original"
+        @click.stop="viewerOriginal = true"
+      >
+        查看原图
+      </button>
+    </div>
   </div>
 </template>
 
@@ -493,6 +576,138 @@ const rangeLabel = computed(() => {
   gap: 2px;
   flex-shrink: 0;
   color: var(--td-success-color);
+}
+
+/* 有完成详情的块可点击（其余块保持穿透，不影响网格滚动） */
+.plan-block.has-completion {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.plan-block__evidence {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.completion-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgb(0 0 0 / 55%);
+}
+
+.completion-card {
+  width: 520px;
+  max-width: 100%;
+  max-height: 82vh;
+  overflow: auto;
+  padding: 18px 20px;
+  border-radius: var(--td-radius-large);
+  background-color: var(--td-bg-color-container);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 25%);
+}
+
+.completion-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.completion-card__title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.completion-card__close {
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+}
+
+.completion-card__note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--td-text-color-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.completion-card__images {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.completion-card__images img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--td-radius-medium);
+  border: 1px solid var(--td-component-stroke);
+  cursor: zoom-in;
+}
+
+.completion-card__files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.completion-card__files a {
+  font-size: 13px;
+  color: var(--td-brand-color);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background-color: rgb(0 0 0 / 72%);
+  cursor: zoom-out;
+}
+
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--td-radius-medium);
+  cursor: default;
+}
+
+.image-viewer__original {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  border: none;
+  border-radius: 999px;
+  background-color: rgb(255 255 255 / 90%);
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  cursor: pointer;
 }
 
 @media (max-width: 768px) {

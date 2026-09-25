@@ -146,6 +146,20 @@ export function createShare(baseUrl, token, dateStart, dateEnd) {
   })
 }
 
+/**
+ * 上传完成详情的图片 / 附件（base64）。
+ * 服务端校验类型与大小后落盘，返回同源的相对路径 `{ url: '/uploads/xxx' }`。
+ */
+export function uploadFile(baseUrl, token, { name, mime, base64 }) {
+  return request(baseUrl, '/api/upload', {
+    method: 'POST',
+    body: { name, mime, data: base64 },
+    token,
+    // 大图 base64 上传比快照慢，单独放宽超时
+    timeout: 30000,
+  })
+}
+
 /** 公开读取分享：不带令牌，返回 { dateStart, dateEnd, plans } */
 export function fetchShare(baseUrl, code) {
   return request(baseUrl, `/api/share/${encodeURIComponent(code)}`)
