@@ -90,6 +90,22 @@ async function copyShare() {
 /** 日程广场面板里只列出非空的合集 */
 const plazaCollections = computed(() => plazaStore.collections.filter((c) => c.items.length))
 
+/** 面板里每个合集默认直接展示前几条，其余点「展开」再看（与日程广场页一致） */
+const DOCK_PREVIEW_COUNT = 5
+const dockExpanded = ref(new Set())
+
+function toggleDockExpanded(id) {
+  const next = new Set(dockExpanded.value)
+  if (!next.delete(id)) next.add(id)
+  dockExpanded.value = next
+}
+
+function dockItems(collection) {
+  return dockExpanded.value.has(collection.id)
+    ? collection.items
+    : collection.items.slice(0, DOCK_PREVIEW_COUNT)
+}
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max)
 }
@@ -98,8 +114,14 @@ function clamp(value, min, max) {
 const FIRST_HOUR = TIMELINE_HOURS[0]
 const END_HOUR = TIMELINE_HOURS[TIMELINE_HOURS.length - 1] + 1
 const HOURS_COUNT = TIMELINE_HOURS.length
-/** 同一时间段重叠时上下分层，每层高度 */
-const LANE_HEIGHT = 60
+/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行） */
+const LANE_HEIGHT = 76
+/**
+ * 短日程的最小显示宽度（小时）：不足 1 小时的块向右撑到 1 小时格，
+ * 否则 30 分钟的块只有一半列宽，标题几乎显示不出来。
+ * 只影响视觉宽度：时间文字、拖拽与拉伸仍按真实起止时间计算。
+ */
+const MIN_DISPLAY_HOURS = 1
 /** 拉伸时的时间吸附步长（分钟），左右两个边缘都按这个粒度走 */
 const SNAP_MINUTES = 15
 /** 吸附步长换算成小时（0.25h），开始时间也按它取整 */
@@ -355,16 +377,36 @@ function layoutDay(rawItems) {
     item.lane = lane
   })
 
+  const blocks = items.map((item) => ({
+    plan: item.plan,
+    lane: item.lane,
+    start: item.start,
+    end: item.end,
+  }))
+
+  // 短块向右撑到最小显示宽度；items 已按开始时间排序，同车道内
+  // 彼此不重叠，因此止于下一块的开始时间即可避免遮挡。
+  const laneGroups = new Map()
+  blocks.forEach((block) => {
+    const list = laneGroups.get(block.lane)
+    if (list) list.push(block)
+    else laneGroups.set(block.lane, [block])
+  })
+  laneGroups.forEach((list) => {
+    list.forEach((block, index) => {
+      const next = list[index + 1]
+      const displayEnd = Math.min(
+        Math.max(block.end, block.start + MIN_DISPLAY_HOURS),
+        next ? next.start : END_HOUR,
+      )
+      block.left = ((block.start - FIRST_HOUR) / HOURS_COUNT) * 100
+      block.width = ((displayEnd - block.start) / HOURS_COUNT) * 100
+    })
+  })
+
   return {
     lanes: Math.max(laneEnds.length, 1),
-    blocks: items.map((item) => ({
-      plan: item.plan,
-      lane: item.lane,
-      start: item.start,
-      end: item.end,
-      left: ((item.start - FIRST_HOUR) / HOURS_COUNT) * 100,
-      width: ((item.end - item.start) / HOURS_COUNT) * 100,
-    })),
+    blocks,
   }
 }
 
@@ -855,7 +897,9 @@ watch(
   <div class="schedule">
     <div class="schedule__main">
       <div class="schedule__toolbar">
-        <span class="schedule__toolbar-hint">点“＋ 添加日程”打开日程广场，把日程拖到时间线上排班</span>
+        <span class="schedule__toolbar-hint"
+          >点“＋ 添加日程”打开日程广场，把日程拖到时间线上排班</span
+        >
         <div class="schedule__toolbar-actions">
           <t-button theme="default" variant="outline" size="small" @click="openShare">
             <template #icon><ShareIcon /></template>
@@ -868,135 +912,141 @@ watch(
         </div>
       </div>
       <t-card :bordered="false" class="schedule__calendar-card">
-      <div
-        ref="calendarRef"
-        class="calendar"
-        :class="{ 'is-pointer-dragging': !!dragging }"
-        :style="{ '--calendar-hours-count': HOURS_COUNT }"
-        @scroll.passive="handleScroll"
-      >
-        <div class="calendar__head">
-          <div class="calendar__corner">日期 / 时间</div>
-          <div class="calendar__hours">
-            <div v-for="hour in TIMELINE_HOURS" :key="`hour-${hour}`" class="calendar__hour">
-              {{ formatHour(hour) }}
+        <div
+          ref="calendarRef"
+          class="calendar"
+          :class="{ 'is-pointer-dragging': !!dragging }"
+          :style="{ '--calendar-hours-count': HOURS_COUNT }"
+          @scroll.passive="handleScroll"
+        >
+          <div class="calendar__head">
+            <div class="calendar__corner">日期 / 时间</div>
+            <div class="calendar__hours">
+              <div v-for="hour in TIMELINE_HOURS" :key="`hour-${hour}`" class="calendar__hour">
+                {{ formatHour(hour) }}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="calendar__body">
-          <!-- 虚拟滚动：上方占位块撑起未渲染的日期行 -->
-          <div class="calendar__spacer" :style="{ height: `${paddingTop}px` }" aria-hidden="true" />
+          <div class="calendar__body">
+            <!-- 虚拟滚动：上方占位块撑起未渲染的日期行 -->
+            <div
+              class="calendar__spacer"
+              :style="{ height: `${paddingTop}px` }"
+              aria-hidden="true"
+            />
 
-          <div
-            v-for="date in visibleDays"
-            :key="date"
-            class="calendar__row"
-            :class="{ 'is-weekend': isWeekend(date), 'is-today': isToday(date) }"
-          >
-            <div class="calendar__date" :class="{ 'is-today': isToday(date) }" :data-date="date">
-              <div class="calendar__date-line">
-                <span class="calendar__date-week">{{ weekdayShortCN(date) }}</span>
-                <t-tag v-if="isToday(date)" size="small" variant="light" theme="primary"
-                  >今天</t-tag
-                >
+            <div
+              v-for="date in visibleDays"
+              :key="date"
+              class="calendar__row"
+              :class="{ 'is-weekend': isWeekend(date), 'is-today': isToday(date) }"
+            >
+              <div class="calendar__date" :class="{ 'is-today': isToday(date) }" :data-date="date">
+                <div class="calendar__date-line">
+                  <span class="calendar__date-week">{{ weekdayShortCN(date) }}</span>
+                  <t-tag v-if="isToday(date)" size="small" variant="light" theme="primary"
+                    >今天</t-tag
+                  >
+                </div>
+                <span class="calendar__date-md">{{ formatMD(date) }}</span>
               </div>
-              <span class="calendar__date-md">{{ formatMD(date) }}</span>
-            </div>
 
-            <!-- 用 min-height 而不是 height：这样日期列和时间轴区都靠网格拉伸对齐，
+              <!-- 用 min-height 而不是 height：这样日期列和时间轴区都靠网格拉伸对齐，
                不会出现一边被内容撑高、另一边固定高度导致横线错位 -->
-            <div class="calendar__row-body" :style="{ minHeight: rowHeight(date) }">
-              <div class="calendar__cells">
-                <div
-                  v-for="hour in TIMELINE_HOURS"
-                  :key="`${date}-${hour}`"
-                  class="calendar__cell"
-                  :class="{ 'is-over': dragOverCell === `${date}#${hour}` }"
-                  :data-date="date"
-                  :data-hour="hour"
-                >
-                  <span
-                    v-if="dragOverCell === `${date}#${hour}`"
-                    class="calendar__placeholder-text"
+              <div class="calendar__row-body" :style="{ minHeight: rowHeight(date) }">
+                <div class="calendar__cells">
+                  <div
+                    v-for="hour in TIMELINE_HOURS"
+                    :key="`${date}-${hour}`"
+                    class="calendar__cell"
+                    :class="{ 'is-over': dragOverCell === `${date}#${hour}` }"
+                    :data-date="date"
+                    :data-hour="hour"
                   >
-                    排到这里
-                  </span>
-                  <button
-                    v-else-if="!plansAt(date, hour).length"
-                    type="button"
-                    class="calendar__add"
-                    title="打开日程广场，拖日程到此处排班"
-                    aria-label="打开日程广场"
-                    @click="openPlaza"
-                  >
-                    <AddIcon />
-                  </button>
-                </div>
-              </div>
-
-              <div class="plan-layer">
-                <div
-                  v-for="block in blocksOf(date)"
-                  :key="block.plan.id"
-                  class="plan-block"
-                  :class="{
-                    'is-done': block.plan.done,
-                    'is-resizing': resizing?.planId === block.plan.id,
-                    'is-drag-source': dragging?.id === block.plan.id,
-                  }"
-                  :style="{
-                    left: `${block.left}%`,
-                    width: `${block.width}%`,
-                    top: `${block.lane * LANE_HEIGHT + 4}px`,
-                    height: `${LANE_HEIGHT - 8}px`,
-                    borderLeftColor: categoryColor(block.plan.category),
-                  }"
-                  @pointerdown="onBlockPointerDown($event, block.plan)"
-                >
-                  <div class="plan-block__main">
-                    <div class="plan-block__title">{{ block.plan.title }}</div>
-                    <div class="plan-block__meta">
-                      <span>{{ formatClock(block.start) }} - {{ formatClock(block.end) }}</span>
-                      <span v-if="block.plan.done" class="plan-block__done">
-                        <CheckIcon />
-                        已完成
-                      </span>
-                    </div>
+                    <span
+                      v-if="dragOverCell === `${date}#${hour}`"
+                      class="calendar__placeholder-text"
+                    >
+                      排到这里
+                    </span>
+                    <button
+                      v-else-if="!plansAt(date, hour).length"
+                      type="button"
+                      class="calendar__add"
+                      title="打开日程广场，拖日程到此处排班"
+                      aria-label="打开日程广场"
+                      @click="openPlaza"
+                    >
+                      <AddIcon />
+                    </button>
                   </div>
+                </div>
 
-                  <span
-                    class="plan-block__handle plan-block__handle--start"
-                    title="拖动调整开始时间（结束时间不变）"
-                    draggable="false"
-                    @mousedown.stop.prevent="startResize($event, block.plan, 'start')"
-                  />
-                  <span
-                    class="plan-block__handle plan-block__handle--end"
-                    title="拖动调整时间跨度"
-                    draggable="false"
-                    @mousedown.stop.prevent="startResize($event, block.plan, 'end')"
-                  />
+                <div class="plan-layer">
+                  <div
+                    v-for="block in blocksOf(date)"
+                    :key="block.plan.id"
+                    class="plan-block"
+                    :class="{
+                      'is-done': block.plan.done,
+                      'is-resizing': resizing?.planId === block.plan.id,
+                      'is-drag-source': dragging?.id === block.plan.id,
+                    }"
+                    :style="{
+                      left: `${block.left}%`,
+                      width: `${block.width}%`,
+                      top: `${block.lane * LANE_HEIGHT + 4}px`,
+                      height: `${LANE_HEIGHT - 8}px`,
+                      borderLeftColor: categoryColor(block.plan.category),
+                    }"
+                    @pointerdown="onBlockPointerDown($event, block.plan)"
+                  >
+                    <div class="plan-block__main">
+                      <div class="plan-block__title" :title="block.plan.title">
+                        {{ block.plan.title }}
+                      </div>
+                      <div class="plan-block__meta">
+                        <span>{{ formatClock(block.start) }} - {{ formatClock(block.end) }}</span>
+                        <span v-if="block.plan.done" class="plan-block__done">
+                          <CheckIcon />
+                          已完成
+                        </span>
+                      </div>
+                    </div>
+
+                    <span
+                      class="plan-block__handle plan-block__handle--start"
+                      title="拖动调整开始时间（结束时间不变）"
+                      draggable="false"
+                      @mousedown.stop.prevent="startResize($event, block.plan, 'start')"
+                    />
+                    <span
+                      class="plan-block__handle plan-block__handle--end"
+                      title="拖动调整时间跨度"
+                      draggable="false"
+                      @mousedown.stop.prevent="startResize($event, block.plan, 'end')"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
+
+            <!-- 虚拟滚动：下方占位块撑起未渲染的日期行 -->
+            <div
+              class="calendar__spacer"
+              :style="{ height: `${paddingBottom}px` }"
+              aria-hidden="true"
+            />
+
+            <div
+              v-if="nowLineVisible"
+              class="calendar__now-line"
+              :style="{ left: `${nowOffsetX}px` }"
+            />
           </div>
-
-          <!-- 虚拟滚动：下方占位块撑起未渲染的日期行 -->
-          <div
-            class="calendar__spacer"
-            :style="{ height: `${paddingBottom}px` }"
-            aria-hidden="true"
-          />
-
-          <div
-            v-if="nowLineVisible"
-            class="calendar__now-line"
-            :style="{ left: `${nowOffsetX}px` }"
-          />
         </div>
-      </div>
-    </t-card>
+      </t-card>
     </div>
 
     <!-- 日程详情：把日程表往左挤压，从右侧展开 -->
@@ -1036,7 +1086,11 @@ watch(
 
             <div class="form-item">
               <label class="form-label">附件或链接</label>
-              <t-input v-model="detailForm.link" placeholder="粘贴网盘 / 文档链接，选填" clearable />
+              <t-input
+                v-model="detailForm.link"
+                placeholder="粘贴网盘 / 文档链接，选填"
+                clearable
+              />
               <a
                 v-if="detailForm.link"
                 class="detail__link"
@@ -1102,14 +1156,13 @@ watch(
             </t-empty>
 
             <div v-else class="plaza-list">
-              <div
-                v-for="collection in plazaCollections"
-                :key="collection.id"
-                class="plaza-group"
-              >
-                <div class="plaza-group__title">{{ collection.name }}</div>
+              <div v-for="collection in plazaCollections" :key="collection.id" class="plaza-group">
+                <div class="plaza-group__title">
+                  <span>{{ collection.name }}</span>
+                  <span class="plaza-group__count">{{ collection.items.length }} 条</span>
+                </div>
                 <div
-                  v-for="item in collection.items"
+                  v-for="item in dockItems(collection)"
                   :key="item.id"
                   class="todo-chip"
                   :class="{ 'is-drag-source': dragging?.id === item.id }"
@@ -1120,7 +1173,7 @@ watch(
                     :style="{ backgroundColor: categoryColor(item.category) }"
                   />
                   <div class="todo-chip__body">
-                    <div class="todo-chip__title">{{ item.title }}</div>
+                    <div class="todo-chip__title" :title="item.title">{{ item.title }}</div>
                     <div class="todo-chip__meta">
                       <t-tag size="small" variant="light" :theme="levelTheme(item.level)">
                         {{ item.level }}
@@ -1130,6 +1183,18 @@ watch(
                     </div>
                   </div>
                 </div>
+                <button
+                  v-if="collection.items.length > DOCK_PREVIEW_COUNT"
+                  type="button"
+                  class="plaza-group__toggle"
+                  @click="toggleDockExpanded(collection.id)"
+                >
+                  {{
+                    dockExpanded.has(collection.id)
+                      ? '收起'
+                      : `展开剩余 ${collection.items.length - DOCK_PREVIEW_COUNT} 条`
+                  }}
+                </button>
               </div>
             </div>
           </div>
@@ -1138,14 +1203,11 @@ watch(
     </div>
 
     <!-- 分享弹窗：选择可查看的日期范围，生成只读链接 -->
-    <t-dialog
-      v-model:visible="shareVisible"
-      header="分享日程表"
-      width="460px"
-      :footer="false"
-    >
+    <t-dialog v-model:visible="shareVisible" header="分享日程表" width="460px" :footer="false">
       <div class="share-form">
-        <p class="share-form__hint">选择允许查看的日期范围，生成一个只读链接；对方只能看到这段时间内的日程，无法编辑。</p>
+        <p class="share-form__hint">
+          选择允许查看的日期范围，生成一个只读链接；对方只能看到这段时间内的日程，无法编辑。
+        </p>
         <div class="share-form__row">
           <label class="share-form__label">开始日期</label>
           <t-date-picker v-model="shareStart" clearable style="width: 100%" />
@@ -1506,9 +1568,12 @@ watch(
   font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
+  /* 标题最多折两行完整展示，超出部分省略并用 title 属性兼容全名 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
 }
 
 .plan-block__meta {
@@ -1566,13 +1631,13 @@ watch(
 }
 
 .todo-panel.is-open {
-  width: 320px;
+  width: 520px;
   margin-left: 16px;
 }
 
 .todo-panel__inner {
   display: flex;
-  width: 320px;
+  width: 520px;
   height: 100%;
   transform: translateX(32px);
   opacity: 0;
@@ -1594,7 +1659,7 @@ watch(
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  width: 320px;
+  width: 520px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--td-radius-large);
   background-color: var(--td-bg-color-container);
@@ -1688,10 +1753,36 @@ watch(
 }
 
 .plaza-group__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: 4px;
   font-size: 12px;
   font-weight: 600;
   color: var(--td-text-color-secondary);
+}
+
+.plaza-group__count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--td-text-color-placeholder);
+}
+
+.plaza-group__toggle {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  color: var(--td-brand-color);
+  cursor: pointer;
+}
+
+.plaza-group__toggle:hover {
+  opacity: 0.8;
 }
 
 .todo-chip {
@@ -1737,6 +1828,10 @@ watch(
   font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
+  /* 名字再长也不折到第二行：单行省略，悬停看全名 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .todo-chip__meta {
@@ -1911,12 +2006,12 @@ watch(
   }
 
   .todo-panel.is-open {
-    width: 280px;
+    width: 420px;
   }
 
   .todo-panel__inner,
   .todo-dock__panel {
-    width: 280px;
+    width: 420px;
   }
 }
 
@@ -1928,12 +2023,12 @@ watch(
   }
 
   .todo-panel.is-open {
-    width: 240px;
+    width: 320px;
   }
 
   .todo-panel__inner,
   .todo-dock__panel {
-    width: 240px;
+    width: 320px;
   }
 
   .form-row {

@@ -6,7 +6,15 @@ import { CheckIcon } from 'tdesign-icons-vue-next'
 import { categoryColor } from '@/data/plaza'
 import { TIMELINE_HOURS } from '@/stores/plan'
 import { fetchShare } from '@/utils/api'
-import { dateRange, diffDays, formatHour, formatMD, isToday, parseDateKey, weekdayShortCN } from '@/utils/date'
+import {
+  dateRange,
+  diffDays,
+  formatHour,
+  formatMD,
+  isToday,
+  parseDateKey,
+  weekdayShortCN,
+} from '@/utils/date'
 
 const route = useRoute()
 
@@ -14,8 +22,10 @@ const route = useRoute()
 const FIRST_HOUR = TIMELINE_HOURS[0]
 const END_HOUR = TIMELINE_HOURS[TIMELINE_HOURS.length - 1] + 1
 const HOURS_COUNT = TIMELINE_HOURS.length
-/** 同一时间段重叠时上下分层，每层高度 */
-const LANE_HEIGHT = 60
+/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行） */
+const LANE_HEIGHT = 76
+/** 短日程的最小显示宽度（小时）：与日程表一致，窄块向右撑到 1 小时格，止于同车道下一块 */
+const MIN_DISPLAY_HOURS = 1
 
 const loading = ref(true)
 const error = ref('')
@@ -106,16 +116,34 @@ function layoutDay(rawItems) {
     item.lane = lane
   })
 
+  const blocks = items.map((item) => ({
+    plan: item.plan,
+    lane: item.lane,
+    start: item.start,
+    end: item.end,
+  }))
+
+  const laneGroups = new Map()
+  blocks.forEach((block) => {
+    const list = laneGroups.get(block.lane)
+    if (list) list.push(block)
+    else laneGroups.set(block.lane, [block])
+  })
+  laneGroups.forEach((list) => {
+    list.forEach((block, index) => {
+      const next = list[index + 1]
+      const displayEnd = Math.min(
+        Math.max(block.end, block.start + MIN_DISPLAY_HOURS),
+        next ? next.start : END_HOUR,
+      )
+      block.left = ((block.start - FIRST_HOUR) / HOURS_COUNT) * 100
+      block.width = ((displayEnd - block.start) / HOURS_COUNT) * 100
+    })
+  })
+
   return {
     lanes: Math.max(laneEnds.length, 1),
-    blocks: items.map((item) => ({
-      plan: item.plan,
-      lane: item.lane,
-      start: item.start,
-      end: item.end,
-      left: ((item.start - FIRST_HOUR) / HOURS_COUNT) * 100,
-      width: ((item.end - item.start) / HOURS_COUNT) * 100,
-    })),
+    blocks,
   }
 }
 
@@ -199,7 +227,9 @@ const rangeLabel = computed(() => {
                   }"
                 >
                   <div class="plan-block__main">
-                    <div class="plan-block__title">{{ block.plan.title }}</div>
+                    <div class="plan-block__title" :title="block.plan.title">
+                      {{ block.plan.title }}
+                    </div>
                     <div class="plan-block__meta">
                       <span>{{ formatClock(block.start) }} - {{ formatClock(block.end) }}</span>
                       <span v-if="block.plan.done" class="plan-block__done">
@@ -438,9 +468,12 @@ const rangeLabel = computed(() => {
   font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
+  /* 标题最多折两行完整展示，超出部分省略并用 title 属性兼容全名 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
 }
 
 .plan-block__meta {
