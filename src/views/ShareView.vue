@@ -24,8 +24,8 @@ const END_HOUR = TIMELINE_HOURS[TIMELINE_HOURS.length - 1] + 1
 const HOURS_COUNT = TIMELINE_HOURS.length
 /** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行） */
 const LANE_HEIGHT = 76
-/** 短日程的最小显示宽度（小时）：与日程表一致，窄块向右撑到 1 小时格，止于同车道下一块 */
-const MIN_DISPLAY_HOURS = 1
+/** 短日程的最小显示宽度（小时）：与日程表一致，窄块向右撑到 1.5 小时格，止于同车道下一块 */
+const MIN_DISPLAY_HOURS = 1.5
 
 const loading = ref(true)
 const error = ref('')
