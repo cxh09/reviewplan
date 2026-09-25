@@ -598,21 +598,30 @@ function openViewer(img) {
   inset: 0;
   z-index: 2500;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  padding: 24px;
   background-color: rgb(0 0 0 / 55%);
 }
 
+/* 底部弹层：贴底、顶部圆角、从下方滑入；桌面窄屏下限宽居中 */
 .completion-card {
-  width: 520px;
-  max-width: 100%;
-  max-height: 82vh;
+  width: 100%;
+  max-width: 640px;
+  max-height: 80vh;
   overflow: auto;
-  padding: 18px 20px;
-  border-radius: var(--td-radius-large);
+  padding: 18px 20px calc(18px + env(safe-area-inset-bottom));
+  border-radius: var(--td-radius-large) var(--td-radius-large) 0 0;
   background-color: var(--td-bg-color-container);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 25%);
+  animation: completion-slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes completion-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 .completion-card__head {
