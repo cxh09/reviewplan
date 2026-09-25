@@ -78,12 +78,42 @@ async function generateShare() {
   }
 }
 
+/**
+ * 复制文本到剪贴板。
+ * navigator.clipboard 仅在安全上下文（HTTPS / localhost）可用，
+ * 通过 http://IP:PORT 访问时为 undefined，需回退到 execCommand 方案。
+ */
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* 继续走回退方案 */
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-9999px'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 async function copyShare() {
   if (!shareUrl.value) return
-  try {
-    await navigator.clipboard.writeText(shareUrl.value)
+  if (await copyTextToClipboard(shareUrl.value)) {
     MessagePlugin.success('链接已复制')
-  } catch {
+  } else {
     MessagePlugin.warning('复制失败，请手动选中链接复制')
   }
 }
@@ -890,9 +920,14 @@ const detailImageInput = ref(null)
 const detailFileInput = ref(null)
 /** 当前正在上传的类型：image | file | ''，用于按钮 loading */
 const detailUploading = ref('')
-/** 图片预览：默认展示 ≤1MB 的压缩版，点「查看原图」才加载原图 */
-const imageViewer = ref(null)
-const viewerOriginal = ref(false)
+/** 图片预览：用 TDesign ImageViewer；默认展示 ≤1MB 的压缩版，点「查看原图」才加载原图 */
+const viewerVisible = ref(false)
+/** 预览地址列表（切原图时会被替换）与对应的原始完成图片 */
+const viewerImages = ref([])
+const viewerSource = ref([])
+const viewerIndex = ref(0)
+/** 每张图片是否已切换为原图 */
+const viewerOriginals = ref([])
 
 const MAX_DONE_IMAGES = 9
 const MAX_DONE_FILES = 9
@@ -905,10 +940,26 @@ function hasCompletion(plan) {
   return Boolean(plan.done && (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length))
 }
 
-/** 打开图片预览：默认看压缩版，每次打开重置回预览态 */
-function openImageViewer(img) {
-  imageViewer.value = img
-  viewerOriginal.value = false
+/** 打开预览：传入整组图片与当前点击的下标，支持左右切换；每次打开重置回压缩态 */
+function openImageViewer(list, index) {
+  viewerSource.value = list
+  viewerImages.value = list.map((img) => img.preview || img.url)
+  viewerOriginals.value = list.map(() => false)
+  viewerIndex.value = index
+  viewerVisible.value = true
+}
+
+/** 当前图是否有原图可看（有压缩版且尚未切换） */
+const viewerCanViewOriginal = computed(() => {
+  const img = viewerSource.value[viewerIndex.value]
+  return Boolean(img?.preview && img.preview !== img.url && !viewerOriginals.value[viewerIndex.value])
+})
+
+function showViewerOriginal() {
+  const img = viewerSource.value[viewerIndex.value]
+  if (!img) return
+  viewerOriginals.value[viewerIndex.value] = true
+  viewerImages.value[viewerIndex.value] = img.url
 }
 
 function fileToBase64(file) {
@@ -1338,7 +1389,7 @@ watch(
                   <img
                     :src="img.preview || img.url"
                     :alt="img.name"
-                    @click="openImageViewer(img)"
+                    @click="openImageViewer(detailForm.doneImages, index)"
                   />
                   <button
                     type="button"
@@ -1535,22 +1586,22 @@ watch(
       </div>
     </t-dialog>
 
-    <!-- 完成详情图片预览：默认展示压缩版，点「查看原图」才加载原图；点背景关闭 -->
-    <div v-if="imageViewer" class="image-viewer" @click="imageViewer = null">
-      <img
-        :src="viewerOriginal ? imageViewer.url : imageViewer.preview || imageViewer.url"
-        alt="图片预览"
-        @click.stop
-      />
-      <button
-        v-if="imageViewer.preview && imageViewer.preview !== imageViewer.url && !viewerOriginal"
-        type="button"
-        class="image-viewer__original"
-        @click.stop="viewerOriginal = true"
-      >
-        查看原图
-      </button>
-    </div>
+    <!-- 完成详情图片预览：TDesign ImageViewer（缩放/旋转/切换）；默认压缩版，点「查看原图」才加载原图 -->
+    <t-image-viewer
+      v-model:visible="viewerVisible"
+      v-model:index="viewerIndex"
+      :images="viewerImages"
+      :close-on-overlay="true"
+      :z-index="2600"
+    />
+    <button
+      v-if="viewerVisible && viewerCanViewOriginal"
+      type="button"
+      class="image-viewer__original"
+      @click="showViewerOriginal"
+    >
+      查看原图
+    </button>
   </div>
 </template>
 
@@ -2465,30 +2516,13 @@ watch(
   pointer-events: none;
 }
 
-.image-viewer {
-  position: fixed;
-  inset: 0;
-  z-index: 2600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  background-color: rgb(0 0 0 / 72%);
-  cursor: zoom-out;
-}
-
-.image-viewer img {
-  max-width: 100%;
-  max-height: 100%;
-  border-radius: var(--td-radius-medium);
-  cursor: default;
-}
-
+/* 「查看原图」悬浮按钮：盖在 ImageViewer（z-index 2600）之上 */
 .image-viewer__original {
   position: fixed;
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 2700;
   padding: 6px 16px;
   border: none;
   border-radius: 999px;

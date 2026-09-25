@@ -165,21 +165,60 @@ const rangeLabel = computed(() => {
 
 /** 当前弹窗展示的计划（null 关闭） */
 const completionPlan = ref(null)
-/** 图片预览：默认展示 ≤1MB 压缩版，点「查看原图」才加载原图 */
-const viewerImage = ref(null)
-const viewerOriginal = ref(false)
+/** 关闭动画进行中：动画播完才真正移除 DOM */
+const completionClosing = ref(false)
+/** 图片预览：用 TDesign ImageViewer；默认展示 ≤1MB 压缩版，点「查看原图」才加载原图 */
+const viewerVisible = ref(false)
+/** 预览地址列表（切原图时会被替换）与对应的原始完成图片 */
+const viewerImages = ref([])
+const viewerSource = ref([])
+const viewerIndex = ref(0)
+/** 每张图片是否已切换为原图 */
+const viewerOriginals = ref([])
 
 function hasCompletion(plan) {
   return Boolean(plan.done && (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length))
 }
 
 function openCompletion(plan) {
-  if (hasCompletion(plan)) completionPlan.value = plan
+  if (!hasCompletion(plan)) return
+  completionPlan.value = plan
+  completionClosing.value = false
 }
 
-function openViewer(img) {
-  viewerImage.value = img
-  viewerOriginal.value = false
+function closeCompletion() {
+  if (!completionPlan.value || completionClosing.value) return
+  completionClosing.value = true
+  // 兜底：万一 animationend 没触发（如动画被禁用），超时后也要收尾
+  setTimeout(finishCompletionClose, 400)
+}
+
+function finishCompletionClose() {
+  if (!completionClosing.value) return
+  completionPlan.value = null
+  completionClosing.value = false
+}
+
+/** 打开预览：传入整组图片与当前点击的下标，支持左右切换 */
+function openViewer(list, index) {
+  viewerSource.value = list
+  viewerImages.value = list.map((img) => img.preview || img.url)
+  viewerOriginals.value = list.map(() => false)
+  viewerIndex.value = index
+  viewerVisible.value = true
+}
+
+/** 当前图是否有原图可看（有压缩版且尚未切换） */
+const viewerCanViewOriginal = computed(() => {
+  const img = viewerSource.value[viewerIndex.value]
+  return Boolean(img?.preview && img.preview !== img.url && !viewerOriginals.value[viewerIndex.value])
+})
+
+function showViewerOriginal() {
+  const img = viewerSource.value[viewerIndex.value]
+  if (!img) return
+  viewerOriginals.value[viewerIndex.value] = true
+  viewerImages.value[viewerIndex.value] = img.url
 }
 </script>
 
@@ -275,15 +314,20 @@ function openViewer(img) {
     <footer class="share__foot">本页面为只读分享，内容随作者的最新日程实时更新。</footer>
 
     <!-- 完成详情只读弹窗：文字 + 图片（点击放大）+ 附件直链 -->
-    <div v-if="completionPlan" class="completion-dialog" @click.self="completionPlan = null">
-      <div class="completion-card">
+    <div
+      v-if="completionPlan"
+      class="completion-dialog"
+      :class="{ 'completion-dialog--closing': completionClosing }"
+      @click.self="closeCompletion"
+    >
+      <div class="completion-card" @animationend="finishCompletionClose">
         <div class="completion-card__head">
           <span class="completion-card__title">完成详情 · {{ completionPlan.title }}</span>
           <button
             type="button"
             class="completion-card__close"
             aria-label="关闭"
-            @click="completionPlan = null"
+            @click="closeCompletion"
           >
             ×
           </button>
@@ -293,11 +337,11 @@ function openViewer(img) {
         </p>
         <div v-if="completionPlan.doneImages?.length" class="completion-card__images">
           <img
-            v-for="img in completionPlan.doneImages"
+            v-for="(img, idx) in completionPlan.doneImages"
             :key="img.url"
             :src="img.preview || img.url"
             :alt="img.name"
-            @click="openViewer(img)"
+            @click="openViewer(completionPlan.doneImages, idx)"
           />
         </div>
         <div v-if="completionPlan.doneFiles?.length" class="completion-card__files">
@@ -314,22 +358,22 @@ function openViewer(img) {
       </div>
     </div>
 
-    <!-- 图片预览：默认展示压缩版，点「查看原图」才加载原图 -->
-    <div v-if="viewerImage" class="image-viewer" @click="viewerImage = null">
-      <img
-        :src="viewerOriginal ? viewerImage.url : viewerImage.preview || viewerImage.url"
-        alt="图片预览"
-        @click.stop
-      />
-      <button
-        v-if="viewerImage.preview && viewerImage.preview !== viewerImage.url && !viewerOriginal"
-        type="button"
-        class="image-viewer__original"
-        @click.stop="viewerOriginal = true"
-      >
-        查看原图
-      </button>
-    </div>
+    <!-- 图片预览：TDesign ImageViewer（缩放/旋转/切换）；默认压缩版，点「查看原图」才加载原图 -->
+    <t-image-viewer
+      v-model:visible="viewerVisible"
+      v-model:index="viewerIndex"
+      :images="viewerImages"
+      :close-on-overlay="true"
+      :z-index="2600"
+    />
+    <button
+      v-if="viewerVisible && viewerCanViewOriginal"
+      type="button"
+      class="image-viewer__original"
+      @click="showViewerOriginal"
+    >
+      查看原图
+    </button>
   </div>
 </template>
 
@@ -601,6 +645,16 @@ function openViewer(img) {
   align-items: flex-end;
   justify-content: center;
   background-color: rgb(0 0 0 / 55%);
+  animation: completion-fade-in 0.28s ease;
+}
+
+/* 关闭中：遮罩淡出 + 卡片下滑，与弹入动画对称 */
+.completion-dialog--closing {
+  animation: completion-fade-out 0.28s ease forwards;
+}
+
+.completion-dialog--closing .completion-card {
+  animation: completion-slide-down 0.28s cubic-bezier(0.55, 0, 0.55, 0.2) forwards;
 }
 
 /* 底部弹层：贴底、顶部圆角、从下方滑入；桌面窄屏下限宽居中 */
@@ -621,6 +675,33 @@ function openViewer(img) {
   }
   to {
     transform: translateY(0);
+  }
+}
+
+@keyframes completion-slide-down {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes completion-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes completion-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 
@@ -686,30 +767,13 @@ function openViewer(img) {
   white-space: nowrap;
 }
 
-.image-viewer {
-  position: fixed;
-  inset: 0;
-  z-index: 2600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  background-color: rgb(0 0 0 / 72%);
-  cursor: zoom-out;
-}
-
-.image-viewer img {
-  max-width: 100%;
-  max-height: 100%;
-  border-radius: var(--td-radius-medium);
-  cursor: default;
-}
-
+/* 「查看原图」悬浮按钮：盖在 ImageViewer（z-index 2600）之上 */
 .image-viewer__original {
   position: fixed;
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 2700;
   padding: 6px 16px;
   border: none;
   border-radius: 999px;
