@@ -68,7 +68,8 @@ async function generateShare() {
       shareStart.value,
       shareEnd.value,
     )
-    shareUrl.value = `${syncStore.normalizedUrl}/share/${res.code}`
+    // 分享页由服务端同源托管，链接以当前页面来源为准，避免带上设置里的内网/失效地址
+    shareUrl.value = `${window.location.origin}/share/${res.code}`
     MessagePlugin.success('分享链接已生成')
   } catch (err) {
     MessagePlugin.error(err?.message || '生成分享链接失败')
