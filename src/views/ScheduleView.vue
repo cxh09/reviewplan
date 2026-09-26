@@ -145,8 +145,8 @@ function clamp(value, min, max) {
 const FIRST_HOUR = TIMELINE_HOURS[0]
 const END_HOUR = TIMELINE_HOURS[TIMELINE_HOURS.length - 1] + 1
 const HOURS_COUNT = TIMELINE_HOURS.length
-/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行） */
-const LANE_HEIGHT = 76
+/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行，随 1.5 倍字号同步加高） */
+const LANE_HEIGHT = 114
 /**
  * 短日程的最小显示宽度（小时）：不足 1.5 小时的块向右撑到 1.5 小时格，
  * 保证单行标题与「时间 + 已完成」徽标都放得下，不被裁切。
@@ -1428,7 +1428,20 @@ watch(
                     rel="noopener noreferrer"
                     class="completion__file-link"
                   >
-                    <LinkIcon />
+                    <svg
+                      class="file-clip"
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"
+                      />
+                    </svg>
                     {{ file.name || file.url.split('/').pop() }}
                   </a>
                   <button
@@ -1646,7 +1659,7 @@ watch(
 }
 
 .schedule__toolbar-hint {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-secondary);
 }
 
@@ -1665,7 +1678,7 @@ watch(
 
 .share-form__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: 18px;
   line-height: 1.6;
   color: var(--td-text-color-secondary);
 }
@@ -1677,9 +1690,9 @@ watch(
 }
 
 .share-form__label {
-  width: 64px;
+  width: 96px;
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 20px;
   color: var(--td-text-color-secondary);
 }
 
@@ -1710,8 +1723,8 @@ watch(
 /* ---------- 日历网格 ---------- */
 
 .calendar {
-  --calendar-date-width: 118px;
-  --calendar-hour-width: 124px;
+  --calendar-date-width: 177px;
+  --calendar-hour-width: 186px;
   position: relative;
   /* 撑满卡片剩余高度，随视口自适应 */
   flex: 1;
@@ -1770,7 +1783,7 @@ watch(
   padding: 10px 12px;
   border-right: 1px solid var(--td-component-stroke);
   border-bottom: 1px solid var(--td-component-stroke);
-  font-size: 12px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--td-text-color-secondary);
   background-color: var(--td-bg-color-secondarycontainer);
@@ -1784,7 +1797,7 @@ watch(
 .calendar__hour {
   padding: 10px 6px;
   text-align: center;
-  font-size: 12px;
+  font-size: 18px;
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
   border-right: 1px solid var(--td-component-stroke);
@@ -1818,12 +1831,12 @@ watch(
 }
 
 .calendar__date-week {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
 .calendar__date-md {
-  font-size: 13px;
+  font-size: 20px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1864,7 +1877,7 @@ watch(
 }
 
 .calendar__placeholder-text {
-  font-size: 11px;
+  font-size: 17px;
   color: var(--td-brand-color);
 }
 
@@ -1872,12 +1885,12 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 33px;
+  height: 33px;
   padding: 0;
   border: none;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: 21px;
   color: var(--td-text-color-placeholder);
   background-color: transparent;
   opacity: 0;
@@ -1958,7 +1971,7 @@ watch(
 }
 
 .plan-block__title {
-  font-size: 12px;
+  font-size: 18px;
   font-weight: 500;
   line-height: 1.35;
   /* 标题最多折两行完整展示，超出部分省略并用 title 属性兼容全名 */
@@ -1975,7 +1988,7 @@ watch(
   gap: 6px;
   margin-top: 2px;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 17px;
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
 }
@@ -1992,7 +2005,7 @@ watch(
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 7px;
+  width: 10px;
   cursor: col-resize;
   transition: background-color 0.15s ease;
 }
@@ -2024,13 +2037,13 @@ watch(
 }
 
 .todo-panel.is-open {
-  width: 520px;
+  width: 780px;
   margin-left: 16px;
 }
 
 .todo-panel__inner {
   display: flex;
-  width: 520px;
+  width: 780px;
   height: 100%;
   transform: translateX(32px);
   opacity: 0;
@@ -2052,7 +2065,7 @@ watch(
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  width: 520px;
+  width: 780px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--td-radius-large);
   background-color: var(--td-bg-color-container);
@@ -2078,7 +2091,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  font-size: 23px;
   font-weight: 600;
 }
 
@@ -2086,12 +2099,12 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 33px;
+  height: 33px;
   padding: 0;
   border: none;
   border-radius: 4px;
-  font-size: 15px;
+  font-size: 23px;
   color: var(--td-text-color-placeholder);
   background-color: transparent;
   cursor: pointer;
@@ -2109,7 +2122,7 @@ watch(
   margin: 0 16px 12px;
   padding: 8px 10px;
   border-radius: var(--td-radius-medium);
-  font-size: 12px;
+  font-size: 18px;
   line-height: 1.65;
   color: var(--td-text-color-secondary);
   background-color: var(--td-bg-color-secondarycontainer);
@@ -2151,14 +2164,14 @@ watch(
   justify-content: space-between;
   gap: 8px;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--td-text-color-secondary);
 }
 
 .plaza-group__count {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 17px;
   font-weight: 400;
   color: var(--td-text-color-placeholder);
 }
@@ -2169,7 +2182,7 @@ watch(
   padding: 4px 0;
   border: none;
   background: none;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-brand-color);
   cursor: pointer;
 }
@@ -2218,7 +2231,7 @@ watch(
 }
 
 .todo-chip__title {
-  font-size: 13px;
+  font-size: 20px;
   font-weight: 500;
   line-height: 1.4;
   /* 名字再长也不折到第二行：单行省略，悬停看全名 */
@@ -2232,7 +2245,7 @@ watch(
   align-items: center;
   gap: 6px;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 17px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -2247,10 +2260,10 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 33px;
+  height: 33px;
   border-radius: 4px;
-  font-size: 14px;
+  font-size: 21px;
   color: var(--td-text-color-secondary);
   cursor: pointer;
 }
@@ -2277,13 +2290,13 @@ watch(
 }
 
 .detail-panel.is-open {
-  width: 380px;
+  width: 570px;
   margin-left: 16px;
 }
 
 /* 内层做"跟进"动画：收起时快速淡出，展开时轻微右移滑入 + 淡入，错峰于宽度动画 */
 .detail-panel__inner {
-  width: 380px;
+  width: 570px;
   transform: translateX(32px);
   opacity: 0;
   transition:
@@ -2300,7 +2313,7 @@ watch(
 }
 
 .detail-card__title {
-  font-size: 15px;
+  font-size: 23px;
   font-weight: 600;
 }
 
@@ -2308,12 +2321,12 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   border: none;
   border-radius: 4px;
-  font-size: 16px;
+  font-size: 24px;
   color: var(--td-text-color-placeholder);
   background-color: transparent;
   cursor: pointer;
@@ -2337,14 +2350,14 @@ watch(
 }
 
 .detail__title {
-  font-size: 15px;
+  font-size: 23px;
   font-weight: 600;
   line-height: 1.45;
 }
 
 .detail__meta {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -2353,7 +2366,7 @@ watch(
   align-items: center;
   gap: 4px;
   margin-top: 6px;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-brand-color);
   text-decoration: none;
 }
@@ -2379,7 +2392,7 @@ watch(
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: 20px;
   font-weight: 500;
   color: var(--td-text-color-secondary);
 }
@@ -2391,37 +2404,37 @@ watch(
 
 @media (max-width: 1100px) {
   .detail-panel.is-open {
-    width: 300px;
+    width: 450px;
   }
 
   .detail-panel__inner {
-    width: 300px;
+    width: 450px;
   }
 
   .todo-panel.is-open {
-    width: 420px;
+    width: 630px;
   }
 
   .todo-panel__inner,
   .todo-dock__panel {
-    width: 420px;
+    width: 630px;
   }
 }
 
 @media (max-width: 768px) {
   /* 小屏收窄列宽，18 列才不至于要横向拖很久 */
   .calendar {
-    --calendar-date-width: 84px;
-    --calendar-hour-width: 92px;
+    --calendar-date-width: 126px;
+    --calendar-hour-width: 138px;
   }
 
   .todo-panel.is-open {
-    width: 320px;
+    width: 480px;
   }
 
   .todo-panel__inner,
   .todo-dock__panel {
-    width: 320px;
+    width: 480px;
   }
 
   .form-row {
@@ -2445,8 +2458,8 @@ watch(
 
 .completion__thumb {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 108px;
+  height: 108px;
 }
 
 .completion__thumb img {
@@ -2461,13 +2474,13 @@ watch(
 
 .completion__remove {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: -9px;
+  right: -9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 27px;
+  height: 27px;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -2477,8 +2490,8 @@ watch(
 }
 
 .completion__remove :deep(svg) {
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
 }
 
 .completion__files {
@@ -2504,12 +2517,18 @@ watch(
   align-items: center;
   gap: 4px;
   min-width: 0;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-brand-color);
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.completion__file-link .file-clip {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .completion__file .completion__remove {
@@ -2527,7 +2546,7 @@ watch(
   position: absolute;
   right: 4px;
   bottom: 2px;
-  font-size: 10px;
+  font-size: 15px;
   line-height: 1;
   pointer-events: none;
   color: var(--td-text-color-secondary);
@@ -2535,8 +2554,8 @@ watch(
 
 .plan-block__evidence svg {
   display: block;
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
 }
 
 /* 「查看原图」悬浮按钮：盖在 ImageViewer（z-index 2600）之上 */
@@ -2551,7 +2570,7 @@ watch(
   border-radius: 999px;
   background-color: rgb(255 255 255 / 90%);
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: 20px;
   cursor: pointer;
 }
 </style>

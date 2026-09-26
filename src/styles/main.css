@@ -1,5 +1,60 @@
 /* ===== 全局基础样式 ===== */
 
+/*
+ * TDesign 字号令牌整体放大 1.5 倍（按钮/输入框/标签等组件文字随之变大）；
+ * .t-icon 尺寸由这些令牌驱动，图标同步放大。
+ * 行高按 TDesign 默认差值同步 +50% 等比加高，避免文字被行盒裁切。
+ */
+:root {
+  --td-font-size-link-small: 18px;
+  --td-font-size-link-medium: 21px;
+  --td-font-size-link-large: 24px;
+  --td-font-size-mark-small: 18px;
+  --td-font-size-mark-medium: 21px;
+  --td-font-size-body-small: 18px;
+  --td-font-size-body-medium: 21px;
+  --td-font-size-body-large: 24px;
+  --td-font-size-title-small: 21px;
+  --td-font-size-title-medium: 24px;
+  --td-font-size-title-large: 27px;
+  --td-font-size-headline-small: 36px;
+  --td-font-size-headline-medium: 42px;
+  --td-font-size-headline-large: 54px;
+  --td-font-size-display-medium: 72px;
+  --td-font-size-display-large: 96px;
+  --td-line-height-link-small: 30px;
+  --td-line-height-link-medium: 33px;
+  --td-line-height-link-large: 36px;
+  --td-line-height-mark-small: 30px;
+  --td-line-height-mark-medium: 33px;
+  --td-line-height-body-small: 30px;
+  --td-line-height-body-medium: 33px;
+  --td-line-height-body-large: 36px;
+  --td-line-height-title-small: 33px;
+  --td-line-height-title-medium: 36px;
+  --td-line-height-title-large: 39px;
+  --td-line-height-headline-small: 48px;
+  --td-line-height-headline-medium: 56px;
+  --td-line-height-headline-large: 72px;
+  --td-line-height-display-medium: 84px;
+  --td-line-height-display-large: 108px;
+
+  /*
+   * 组件高度令牌同样 ×1.5：按钮/输入框/标签/单选组等固定高度由这些令牌驱动，
+   * 不跟放大的话 18~21px 文字会在控件内垂直裁切。
+   */
+  --td-comp-size-xxs: 30px;
+  --td-comp-size-xs: 36px;
+  --td-comp-size-s: 42px;
+  --td-comp-size-m: 48px;
+  --td-comp-size-l: 54px;
+  --td-comp-size-xl: 60px;
+  --td-comp-size-xxl: 72px;
+  --td-comp-size-xxxl: 84px;
+  --td-comp-size-xxxxl: 96px;
+  --td-comp-size-xxxxxl: 108px;
+}
+
 * {
   box-sizing: border-box;
 }

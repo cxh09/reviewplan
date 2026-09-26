@@ -176,15 +176,15 @@ function handleMenuChange(value) {
 }
 
 .basic-layout__logo {
-  width: 32px;
-  height: 32px;
+  width: 48px;
+  height: 48px;
   border-radius: 8px;
   object-fit: cover;
   display: block;
 }
 
 .basic-layout__title {
-  font-size: 16px;
+  font-size: 24px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -200,12 +200,12 @@ function handleMenuChange(value) {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  font-size: 18px;
+  font-size: 27px;
 }
 
 .basic-layout__countdown {
   margin-right: 4px;
-  font-size: 13px;
+  font-size: 20px;
 }
 
 .basic-layout__content {
@@ -214,7 +214,7 @@ function handleMenuChange(value) {
 }
 
 .basic-layout__notice {
-  font-size: 13px;
+  font-size: 20px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
 

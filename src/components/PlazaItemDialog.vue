@@ -80,7 +80,7 @@ async function handleConfirm() {
             :max="23"
             :step="1"
             theme="column"
-            style="width: 120px"
+            style="width: 180px"
           />
           <span>小时</span>
           <t-input-number
@@ -89,7 +89,7 @@ async function handleConfirm() {
             :max="55"
             :step="5"
             theme="column"
-            style="width: 120px"
+            style="width: 180px"
           />
           <span>分钟</span>
         </t-space>

@@ -386,14 +386,14 @@ function goSchedule() {
 
 .plaza__title {
   margin: 0 0 8px;
-  font-size: 20px;
+  font-size: 30px;
   font-weight: 700;
 }
 
 .plaza__subtitle {
   max-width: 640px;
   margin: 0;
-  font-size: 13px;
+  font-size: 20px;
   line-height: 1.8;
   color: var(--td-text-color-secondary);
 }
@@ -416,7 +416,7 @@ function goSchedule() {
 .plaza__summary {
   display: flex;
   gap: 20px;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -446,19 +446,19 @@ function goSchedule() {
 }
 
 .col__bar {
-  width: 4px;
-  height: 20px;
+  width: 6px;
+  height: 30px;
   border-radius: 2px;
 }
 
 .col__name {
   margin: 0;
-  font-size: 16px;
+  font-size: 24px;
   font-weight: 700;
 }
 
 .col__count {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -472,7 +472,7 @@ function goSchedule() {
 
 .col__desc {
   margin: 8px 0 14px;
-  font-size: 13px;
+  font-size: 20px;
   line-height: 1.7;
   color: var(--td-text-color-secondary);
 }
@@ -492,7 +492,7 @@ function goSchedule() {
   margin: 0;
   padding: 18px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: 20px;
   color: var(--td-text-color-placeholder);
   background-color: var(--td-bg-color-secondarycontainer);
   border-radius: var(--td-radius-medium);
@@ -509,13 +509,13 @@ function goSchedule() {
 
 .row__index {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 33px;
+  height: 33px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-secondary);
   background-color: var(--td-bg-color-component);
 }
@@ -533,18 +533,18 @@ function goSchedule() {
 }
 
 .row__title {
-  font-size: 14px;
+  font-size: 21px;
   font-weight: 600;
 }
 
 .row__duration {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
 .row__desc {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 18px;
   line-height: 1.7;
   color: var(--td-text-color-secondary);
 }
@@ -555,7 +555,7 @@ function goSchedule() {
   gap: 4px;
   margin-top: 4px;
   max-width: 100%;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-brand-color);
   text-decoration: none;
   overflow-wrap: anywhere;

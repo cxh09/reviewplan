@@ -584,7 +584,7 @@ function confirmReset() {
 }
 
 .settings__title {
-  font-size: 15px;
+  font-size: 23px;
   font-weight: 600;
 }
 
@@ -604,12 +604,12 @@ function confirmReset() {
 }
 
 .settings__label-main {
-  font-size: 14px;
+  font-size: 21px;
   font-weight: 500;
 }
 
 .settings__label-tip {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -620,7 +620,7 @@ function confirmReset() {
 }
 
 .settings__picker {
-  width: 180px;
+  width: 270px;
 }
 
 .settings__alert {
@@ -629,12 +629,12 @@ function confirmReset() {
 
 .settings__control--wide {
   flex: 1;
-  min-width: 220px;
+  min-width: 330px;
   justify-content: flex-end;
 }
 
 .settings__input {
-  width: 320px;
+  width: 480px;
   max-width: 100%;
 }
 
@@ -650,7 +650,7 @@ function confirmReset() {
 }
 
 .settings__sync-text {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -664,7 +664,7 @@ function confirmReset() {
 }
 
 .settings__preview-number {
-  font-size: 40px;
+  font-size: 60px;
   font-weight: 700;
   line-height: 1;
   background: linear-gradient(135deg, #0052d9, #00a870);
@@ -677,11 +677,11 @@ function confirmReset() {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 14px;
+  font-size: 21px;
 }
 
 .settings__preview-sub {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -699,12 +699,12 @@ function confirmReset() {
 }
 
 .settings__stat-value {
-  font-size: 22px;
+  font-size: 33px;
   font-weight: 700;
 }
 
 .settings__stat-label {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -720,7 +720,7 @@ function confirmReset() {
 
 .settings__note {
   margin: 16px 0 0;
-  font-size: 12px;
+  font-size: 18px;
   line-height: 1.7;
   color: var(--td-text-color-placeholder);
 }
@@ -736,8 +736,8 @@ function confirmReset() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 64px;
+  width: 96px;
+  height: 96px;
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 50%;
@@ -745,7 +745,7 @@ function confirmReset() {
   background-color: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
   text-align: center;
-  font-size: 12px;
+  font-size: 18px;
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 }
@@ -758,19 +758,19 @@ function confirmReset() {
 
 .profile__form {
   flex: 1;
-  min-width: 240px;
+  min-width: 360px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 .profile__input {
-  max-width: 320px;
+  max-width: 480px;
 }
 
 .profile__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: 18px;
   line-height: 1.7;
   color: var(--td-text-color-placeholder);
 }

@@ -36,7 +36,7 @@ const router = useRouter()
 }
 
 .not-found__code {
-  font-size: 72px;
+  font-size: 108px;
   font-weight: 700;
   line-height: 1;
   background: linear-gradient(135deg, #0052d9, #00a870);
@@ -47,13 +47,13 @@ const router = useRouter()
 
 .not-found__title {
   margin: 20px 0 8px;
-  font-size: 20px;
+  font-size: 30px;
   font-weight: 600;
 }
 
 .not-found__desc {
   margin: 0 0 24px;
-  font-size: 14px;
+  font-size: 21px;
   color: var(--td-text-color-secondary);
 }
 </style>

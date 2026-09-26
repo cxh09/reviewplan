@@ -132,7 +132,7 @@ const statCards = computed(() => [
 
 .home__hero-label {
   margin: 0;
-  font-size: 14px;
+  font-size: 21px;
   color: var(--td-text-color-secondary);
 }
 
@@ -144,7 +144,7 @@ const statCards = computed(() => [
 }
 
 .home__hero-value {
-  font-size: 64px;
+  font-size: 96px;
   font-weight: 700;
   line-height: 1.1;
   background: linear-gradient(135deg, #0052d9, #00a870);
@@ -154,21 +154,21 @@ const statCards = computed(() => [
 }
 
 .home__hero-unit {
-  font-size: 18px;
+  font-size: 27px;
   font-weight: 600;
   color: var(--td-text-color-secondary);
 }
 
 .home__hero-target {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 20px;
   color: var(--td-text-color-secondary);
 }
 
 .home__hero-motd {
   max-width: 520px;
   margin: 0;
-  font-size: 13px;
+  font-size: 20px;
   line-height: 1.8;
   color: var(--td-text-color-placeholder);
 }
@@ -185,7 +185,7 @@ const statCards = computed(() => [
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 16px;
+  font-size: 24px;
   font-weight: 600;
 }
 
@@ -203,12 +203,12 @@ const statCards = computed(() => [
 }
 
 .home__group-date {
-  font-size: 14px;
+  font-size: 21px;
   font-weight: 600;
 }
 
 .home__group-count {
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -233,16 +233,16 @@ const statCards = computed(() => [
 }
 
 .home__plan-bar {
-  width: 3px;
-  height: 18px;
+  width: 5px;
+  height: 27px;
   border-radius: 2px;
   flex-shrink: 0;
 }
 
 .home__plan-time {
-  width: 48px;
+  width: 72px;
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 20px;
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
 }
@@ -250,7 +250,7 @@ const statCards = computed(() => [
 .home__plan-title {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  font-size: 21px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -258,7 +258,7 @@ const statCards = computed(() => [
 
 .home__plan-duration {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -267,13 +267,13 @@ const statCards = computed(() => [
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 18px;
   color: var(--td-success-color);
 }
 
 @media (max-width: 900px) {
   .home__hero-value {
-    font-size: 52px;
+    font-size: 78px;
   }
 }
 </style>
