@@ -928,6 +928,8 @@ const viewerSource = ref([])
 const viewerIndex = ref(0)
 /** 每张图片是否已切换为原图 */
 const viewerOriginals = ref([])
+/** t-image-viewer 不传 trigger 时会渲染默认的「预览」占位块，用空触发器覆盖掉 */
+const emptyTrigger = () => null
 
 const MAX_DONE_IMAGES = 9
 const MAX_DONE_FILES = 9
@@ -1592,6 +1594,7 @@ watch(
       v-model:index="viewerIndex"
       :images="viewerImages"
       :close-on-overlay="true"
+      :trigger="emptyTrigger"
       :z-index="2600"
     />
     <button
