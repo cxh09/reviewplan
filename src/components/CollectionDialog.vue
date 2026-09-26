@@ -127,7 +127,7 @@ async function handleConfirm() {
   border: 2px solid transparent;
   border-radius: 50%;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform var(--rp-duration-fast) ease;
 }
 
 .color-picker__dot:hover {

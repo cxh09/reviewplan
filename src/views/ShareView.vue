@@ -414,6 +414,7 @@ function showViewerOriginal() {
   flex-direction: column;
   min-height: 100vh;
   background-color: var(--td-bg-color-page);
+  animation: rp-fade-in var(--rp-duration-base) ease;
 }
 
 .share__head {
@@ -683,16 +684,16 @@ function showViewerOriginal() {
   align-items: flex-end;
   justify-content: center;
   background-color: rgb(0 0 0 / 55%);
-  animation: completion-fade-in 0.28s ease;
+  animation: completion-fade-in var(--rp-duration-base) ease;
 }
 
 /* 关闭中：遮罩淡出 + 卡片下滑，与弹入动画对称 */
 .completion-dialog--closing {
-  animation: completion-fade-out 0.28s ease forwards;
+  animation: completion-fade-out var(--rp-duration-base) ease forwards;
 }
 
 .completion-dialog--closing .completion-card {
-  animation: completion-slide-down 0.28s cubic-bezier(0.55, 0, 0.55, 0.2) forwards;
+  animation: completion-slide-down var(--rp-duration-base) var(--rp-ease-in-strong) forwards;
 }
 
 /* 底部弹层：贴底、顶部圆角、从下方滑入；桌面窄屏下限宽居中 */
@@ -704,7 +705,7 @@ function showViewerOriginal() {
   padding: 27px 30px calc(27px + env(safe-area-inset-bottom));
   border-radius: var(--td-radius-large) var(--td-radius-large) 0 0;
   background-color: var(--td-bg-color-container);
-  animation: completion-slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: completion-slide-up var(--rp-duration-base) var(--rp-ease-out);
 }
 
 @keyframes completion-slide-up {

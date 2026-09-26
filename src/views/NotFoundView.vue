@@ -26,6 +26,7 @@ const router = useRouter()
   justify-content: center;
   min-height: 100vh;
   padding: 24px;
+  animation: rp-fade-in var(--rp-duration-base) ease;
 }
 
 .not-found__card {

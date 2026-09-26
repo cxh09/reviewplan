@@ -53,6 +53,16 @@
   --td-comp-size-xxxl: 84px;
   --td-comp-size-xxxxl: 96px;
   --td-comp-size-xxxxxl: 108px;
+
+  /*
+   * 全局动效令牌（时长 / 缓动统一收口，与移动端 AppMotion 语义对齐）：
+   * fast=微反馈(150ms)、base=面板/遮罩(260ms)、panel=面板滑入(420ms)。
+   */
+  --rp-duration-fast: 0.15s;
+  --rp-duration-base: 0.26s;
+  --rp-duration-panel: 0.42s;
+  --rp-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --rp-ease-in-strong: cubic-bezier(0.55, 0, 0.55, 0.2);
 }
 
 * {
@@ -89,19 +99,35 @@ a {
   padding: 0 24px;
 }
 
+/* 日程表等带右侧面板的页面取消限宽：
+   面板展开时整行能占满视口，日程表右缘跟随面板左缘联动 */
+.page-container--wide {
+  max-width: none;
+}
+
 @media (max-width: 768px) {
   .page-container {
     padding: 0 16px;
   }
 }
 
-/* 路由切换动画 */
+/* 路由切换动画（时长走全局动效令牌，与移动端 Tab 淡入对齐） */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--rp-duration-base) ease;
 }
 
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 冷进入页（分享页 / 404）一次性淡入，消除首屏硬切 */
+@keyframes rp-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }

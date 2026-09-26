@@ -109,11 +109,12 @@ function handleMenuChange(value) {
       </div>
     </t-header>
 
-    <div
-      v-if="syncStore.connectionState !== 'online'"
-      class="basic-layout__notice"
-      :class="`basic-layout__notice--${noticeTheme}`"
-    >
+    <Transition name="fade">
+      <div
+        v-if="syncStore.connectionState !== 'online'"
+        class="basic-layout__notice"
+        :class="`basic-layout__notice--${noticeTheme}`"
+      >
       <div class="page-container basic-layout__notice-inner">
         <LoadingIcon
           v-if="syncStore.connectionState === 'connecting'"
@@ -131,11 +132,12 @@ function handleMenuChange(value) {
         >
           {{ noticeActionText }}
         </t-button>
+        </div>
       </div>
-    </div>
+    </Transition>
 
     <t-content class="basic-layout__content">
-      <div class="page-container">
+      <div class="page-container" :class="{ 'page-container--wide': route.name === 'schedule' }">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" />

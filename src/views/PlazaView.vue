@@ -294,6 +294,7 @@ function goSchedule() {
         <p class="col__desc">{{ collection.desc || '这个合集还没有写简介' }}</p>
 
         <div v-if="collection.items.length" class="col__items">
+          <TransitionGroup name="fade">
           <div v-for="(item, index) in visibleItems(collection)" :key="item.id" class="row">
             <span class="row__index">{{ index + 1 }}</span>
 
@@ -337,6 +338,7 @@ function goSchedule() {
               </t-button>
             </div>
           </div>
+          </TransitionGroup>
 
           <t-button
             v-if="collection.items.length > PREVIEW_COUNT"

@@ -333,6 +333,7 @@ async function ensureDateRendered(date) {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleEscKey)
   await nextTick()
   // 先量出可视区尺寸，虚拟窗口才知道该渲染多少行
   measureTimeline()
@@ -804,6 +805,7 @@ function stopResize() {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleEscKey)
   stopResize()
   resetPointerDrag()
   if (nowTimer) window.clearInterval(nowTimer)
@@ -899,6 +901,17 @@ function openPlaza() {
 function closeDetail() {
   // 不清 detailId：收起动画期间内容还在，免得卡片先空掉再缩回去
   detailVisible.value = false
+}
+
+/** Esc 关闭右侧面板：详情优先（与广场互斥展开），其次收广场；弹窗/图片预览打开时让位给它们自己的 Esc 关闭 */
+function handleEscKey(e) {
+  if (e.key !== 'Escape') return
+  if (shareVisible.value || viewerVisible.value) return
+  if (detailVisible.value) {
+    closeDetail()
+  } else if (plazaOpen.value) {
+    plazaOpen.value = false
+  }
 }
 
 function detailToggleDone() {
@@ -1638,6 +1651,7 @@ watch(
 /* 日程表与详情面板并排：面板展开时把日程表往左挤 */
 /* 撑满页面高度：减去顶栏 64px 与内容区上下内边距 24+40px */
 .schedule {
+  position: relative;
   display: flex;
   align-items: stretch;
   height: calc(100vh - 128px);
@@ -1647,7 +1661,9 @@ watch(
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-width: 0;
+  /* 与面板挤压联动共存：窄视口下保住日程表最小可用宽度，
+     空间不够时面板改走浮层覆盖（见下方 1323px 断点） */
+  min-width: 480px;
 }
 
 .schedule__toolbar {
@@ -1859,8 +1875,8 @@ watch(
   border-right: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-container);
   transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease;
+    background-color var(--rp-duration-fast) ease,
+    box-shadow var(--rp-duration-fast) ease;
 }
 
 .calendar__row.is-weekend .calendar__cell {
@@ -1896,9 +1912,9 @@ watch(
   opacity: 0;
   cursor: pointer;
   transition:
-    opacity 0.15s ease,
-    background-color 0.15s ease,
-    color 0.15s ease;
+    opacity var(--rp-duration-fast) ease,
+    background-color var(--rp-duration-fast) ease,
+    color var(--rp-duration-fast) ease;
 }
 
 .calendar__cell:hover .calendar__add {
@@ -1941,7 +1957,10 @@ watch(
   pointer-events: auto;
   cursor: grab;
   user-select: none;
-  transition: box-shadow 0.15s ease;
+  /* opacity 过渡：起拖时 is-drag-source 压暗平滑过渡，与移动端 AnimatedOpacity 对齐 */
+  transition:
+    box-shadow var(--rp-duration-fast) ease,
+    opacity var(--rp-duration-fast) ease;
 }
 
 .plan-block:hover {
@@ -2007,7 +2026,7 @@ watch(
   bottom: 0;
   width: 10px;
   cursor: col-resize;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--rp-duration-fast) ease;
 }
 
 .plan-block__handle--start {
@@ -2032,8 +2051,8 @@ watch(
   width: 0;
   overflow: hidden;
   transition:
-    width 0.42s cubic-bezier(0.22, 1, 0.36, 1),
-    margin-left 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+    width var(--rp-duration-panel) var(--rp-ease-out),
+    margin-left var(--rp-duration-panel) var(--rp-ease-out);
 }
 
 .todo-panel.is-open {
@@ -2056,7 +2075,7 @@ watch(
   transform: translateX(0);
   opacity: 1;
   transition:
-    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.06s,
+    transform 0.5s var(--rp-ease-out) 0.06s,
     opacity 0.32s ease 0.1s;
 }
 
@@ -2200,9 +2219,11 @@ watch(
   border-radius: var(--td-radius-medium);
   background-color: var(--td-bg-color-container);
   cursor: grab;
+  /* opacity 过渡：起拖压暗平滑过渡，对齐移动端 */
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color var(--rp-duration-fast) ease,
+    box-shadow var(--rp-duration-fast) ease,
+    opacity var(--rp-duration-fast) ease;
 }
 
 .todo-chip:hover {
@@ -2285,8 +2306,8 @@ watch(
   width: 0;
   overflow: hidden;
   transition:
-    width 0.42s cubic-bezier(0.22, 1, 0.36, 1),
-    margin-left 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+    width var(--rp-duration-panel) var(--rp-ease-out),
+    margin-left var(--rp-duration-panel) var(--rp-ease-out);
 }
 
 .detail-panel.is-open {
@@ -2294,9 +2315,13 @@ watch(
   margin-left: 16px;
 }
 
-/* 内层做"跟进"动画：收起时快速淡出，展开时轻微右移滑入 + 淡入，错峰于宽度动画 */
+/* 内层做"跟进"动画：收起时快速淡出，展开时轻微右移滑入 + 淡入，错峰于宽度动画；
+   高度跟随面板并内部滚动，内容多时（完成详情图片/附件等）可上下滑动 */
 .detail-panel__inner {
   width: 570px;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   transform: translateX(32px);
   opacity: 0;
   transition:
@@ -2308,13 +2333,22 @@ watch(
   transform: translateX(0);
   opacity: 1;
   transition:
-    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.06s,
+    transform 0.5s var(--rp-ease-out) 0.06s,
     opacity 0.32s ease 0.1s;
 }
 
 .detail-card__title {
   font-size: 23px;
   font-weight: 600;
+}
+
+/* 面板内滚动时卡片头部（标题 + 关闭按钮）固定在顶部 */
+.detail-card :deep(.t-card__header) {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: var(--td-bg-color-container);
+  border-radius: var(--td-radius-large) var(--td-radius-large) 0 0;
 }
 
 .detail__close {
@@ -2421,11 +2455,40 @@ watch(
   }
 }
 
+/* 视口宽度不够「日程表最小可用宽 + 面板 + 间距」时，
+   面板不再挤压日程表，改为右侧浮层盖在日程表上 */
+@media (max-width: 1323px) {
+  .todo-panel,
+  .detail-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+  }
+
+  .todo-panel.is-open,
+  .detail-panel.is-open {
+    margin-left: 0;
+  }
+
+  /* 详情面板浮层化后补卡片投影，与广场面板观感一致 */
+  .detail-panel__inner {
+    border-radius: var(--td-radius-large);
+    box-shadow: 0 8px 28px rgb(0 0 0 / 14%);
+  }
+}
+
 @media (max-width: 768px) {
   /* 小屏收窄列宽，18 列才不至于要横向拖很久 */
   .calendar {
     --calendar-date-width: 126px;
     --calendar-hour-width: 138px;
+  }
+
+  /* 手机宽度不足 480px：取消最小宽保护，避免整页横向溢出 */
+  .schedule__main {
+    min-width: 0;
   }
 
   .todo-panel.is-open {
