@@ -13,10 +13,12 @@ import { activeTombstones } from '@/utils/tombstone'
 const STORAGE_KEY = 'reviewplan:server:v1'
 
 /**
- * 服务端与网页同源部署（server 直接托管 dist/），首次使用默认连当前页面地址。
- * 开发模式下由 vite 把 /api 代理到本地 3000，配置同样成立。
+ * 默认服务端地址：构建期通过 VITE_API_BASE_URL 注入（前后端分离部署，
+ * 如 EdgeOne 托管前端 + 内网穿透 api 域名）；未注入时回退到与页面同源
+ * （一体化部署：server 直接托管 dist/，或开发模式由 vite 代理 /api）。
+ * 用户仍可在「设置 → 服务端同步」里覆盖。
  */
-const DEFAULT_SERVER_URL = window.location.origin
+const DEFAULT_SERVER_URL = import.meta.env.VITE_API_BASE_URL || window.location.origin
 
 /** 与 server/src/config.js 的 DEFAULT_ACCESS_TOKEN 保持一致，开箱即用 */
 const DEFAULT_ACCESS_TOKEN =

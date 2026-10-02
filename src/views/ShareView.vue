@@ -5,7 +5,7 @@ import { CheckIcon } from 'tdesign-icons-vue-next'
 
 import { categoryColor } from '@/data/plaza'
 import { TIMELINE_HOURS } from '@/stores/plan'
-import { fetchShare } from '@/utils/api'
+import { defaultApiBase, fetchShare, resolveFileUrl } from '@/utils/api'
 import {
   dateRange,
   diffDays,
@@ -35,6 +35,13 @@ const plans = ref([])
 /** 分享者资料（由服务端随快照实时透出，旧数据为 null） */
 const profile = ref(null)
 
+/**
+ * 分享页没有登录态与设置项，接口与附件都打到构建期注入的默认服务端
+ * （前后端分离时为 api 域名，一体化部署时回退为当前页面同源）。
+ */
+const apiBase = defaultApiBase()
+const fileUrl = (url) => resolveFileUrl(url, apiBase)
+
 async function load() {
   const code = route.params.code
   if (!code) {
@@ -44,7 +51,7 @@ async function load() {
   }
   loading.value = true
   try {
-    const res = await fetchShare(window.location.origin, code)
+    const res = await fetchShare(apiBase, code)
     dateStart.value = res.dateStart
     dateEnd.value = res.dateEnd
     plans.value = Array.isArray(res.plans) ? res.plans : []
@@ -179,7 +186,10 @@ const viewerOriginals = ref([])
 const emptyTrigger = () => null
 
 function hasCompletion(plan) {
-  return Boolean(plan.done && (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length))
+  return Boolean(
+    plan.done &&
+      (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length || plan.recite),
+  )
 }
 
 function openCompletion(plan) {
@@ -204,7 +214,7 @@ function finishCompletionClose() {
 /** 打开预览：传入整组图片与当前点击的下标，支持左右切换 */
 function openViewer(list, index) {
   viewerSource.value = list
-  viewerImages.value = list.map((img) => img.preview || img.url)
+  viewerImages.value = list.map((img) => fileUrl(img.preview || img.url))
   viewerOriginals.value = list.map(() => false)
   viewerIndex.value = index
   viewerVisible.value = true
@@ -220,7 +230,7 @@ function showViewerOriginal() {
   const img = viewerSource.value[viewerIndex.value]
   if (!img) return
   viewerOriginals.value[viewerIndex.value] = true
-  viewerImages.value[viewerIndex.value] = img.url
+  viewerImages.value[viewerIndex.value] = fileUrl(img.url)
 }
 </script>
 
@@ -348,6 +358,21 @@ function showViewerOriginal() {
             ×
           </button>
         </div>
+        <!-- 背诵结果：正确率 + 不会的字 / 句子（只读，与日程表详情面板同步维护） -->
+        <div v-if="completionPlan.recite" class="recite-result">
+          <div class="recite-result__head">
+            <span class="recite-result__rate">背诵正确率 {{ completionPlan.recite.rate }}%</span>
+            <span class="recite-result__total">共 {{ completionPlan.recite.total }} 空</span>
+          </div>
+          <div v-if="completionPlan.recite.wrongChars?.length" class="recite-result__chars">
+            <span v-for="(ch, i) in completionPlan.recite.wrongChars" :key="i" class="recite-result__char">
+              {{ ch }}
+            </span>
+          </div>
+          <ul v-if="completionPlan.recite.wrongSentences?.length" class="recite-result__sents">
+            <li v-for="(sent, i) in completionPlan.recite.wrongSentences" :key="i">{{ sent }}</li>
+          </ul>
+        </div>
         <p v-if="completionPlan.doneNote" class="completion-card__note">
           {{ completionPlan.doneNote }}
         </p>
@@ -355,7 +380,7 @@ function showViewerOriginal() {
           <img
             v-for="(img, idx) in completionPlan.doneImages"
             :key="img.url"
-            :src="img.preview || img.url"
+            :src="fileUrl(img.preview || img.url)"
             :alt="img.name"
             @click="openViewer(completionPlan.doneImages, idx)"
           />
@@ -364,7 +389,7 @@ function showViewerOriginal() {
           <a
             v-for="file in completionPlan.doneFiles"
             :key="file.url"
-            :href="file.url"
+            :href="fileUrl(file.url)"
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -764,6 +789,56 @@ function showViewerOriginal() {
   line-height: 1;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
+}
+
+/* 背诵结果块：与 ScheduleView 同款结构，字号随分享页整体放大 */
+.recite-result {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.recite-result__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 20px;
+}
+
+.recite-result__rate {
+  font-weight: 700;
+  color: var(--td-brand-color);
+}
+
+.recite-result__total {
+  color: var(--td-text-color-secondary);
+}
+
+.recite-result__chars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.recite-result__char {
+  min-width: 32px;
+  padding: 2px 8px;
+  text-align: center;
+  font-size: 20px;
+  color: var(--td-error-color);
+  background: var(--td-error-color-light);
+  border-radius: 4px;
+}
+
+.recite-result__sents {
+  margin: 10px 0 0;
+  padding-left: 22px;
+  font-size: 18px;
+  line-height: 1.8;
+  color: var(--td-text-color-secondary);
 }
 
 .completion-card__note {

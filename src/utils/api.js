@@ -8,6 +8,27 @@
 const DEFAULT_TIMEOUT = 10000
 
 /**
+ * 前后端分离部署时的默认服务端地址（构建期注入，见 .env.production）。
+ * 未配置时回退到与页面同源，保持一体化部署 / 本地开发的原有行为。
+ */
+export function defaultApiBase() {
+  return import.meta.env.VITE_API_BASE_URL || window.location.origin
+}
+
+/**
+ * 把服务端相对路径（/uploads/xxx）解析成完整 URL。
+ * 前端与 API 不同源时（EdgeOne 托管 + 内网穿透），直接渲染相对路径会打到前端域名上 404，
+ * 必须拼上服务端地址；绝对地址 / dataURL 原样返回。
+ */
+export function resolveFileUrl(url, baseUrl) {
+  const value = `${url ?? ''}`
+  if (!value) return ''
+  if (value.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(value)) return value
+  const base = normalizeServerUrl(baseUrl) || defaultApiBase()
+  return `${base}${value.startsWith('/') ? value : `/${value}`}`
+}
+
+/**
  * 归一化服务端地址：
  * - 去掉首尾空白
  * - 没写协议时默认补 http://

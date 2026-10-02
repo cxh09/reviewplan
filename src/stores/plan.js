@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 import { ensureWritable } from '@/utils/connection'
 import { addDays, diffDays, parseDateKey, todayKey, toDateKey } from '@/utils/date'
 import { createId } from '@/utils/id'
+import { normalizeRecite } from '@/utils/recitation'
 import { activeTombstones, markDeleted, markDeletedMany, setTombstones } from '@/utils/tombstone'
 import { sanitizeLink } from '@/utils/url'
 
@@ -88,6 +89,8 @@ function normalizePlan(raw) {
     doneNote: `${raw?.doneNote ?? ''}`.slice(0, 2000),
     doneImages: sanitizeFileRefs(raw?.doneImages),
     doneFiles: sanitizeFileRefs(raw?.doneFiles),
+    // 古诗文背诵结果（正确率 + 不会的字 / 句子），非背诵篇目为 null
+    recite: normalizeRecite(raw?.recite),
   }
 }
 
@@ -176,6 +179,7 @@ export const usePlanStore = defineStore('plan', () => {
       doneNote: '',
       doneImages: [],
       doneFiles: [],
+      recite: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
@@ -256,9 +260,11 @@ export const usePlanStore = defineStore('plan', () => {
         clamp(toNumber(patch.duration, plan.duration), MIN_DURATION, MAX_DURATION),
       )
     }
+    if (patch.done !== undefined) plan.done = Boolean(patch.done)
     if (patch.doneNote !== undefined) plan.doneNote = `${patch.doneNote ?? ''}`.slice(0, 2000)
     if (Array.isArray(patch.doneImages)) plan.doneImages = sanitizeFileRefs(patch.doneImages)
     if (Array.isArray(patch.doneFiles)) plan.doneFiles = sanitizeFileRefs(patch.doneFiles)
+    if ('recite' in patch) plan.recite = patch.recite ? normalizeRecite(patch.recite) : null
 
     plan.updatedAt = Date.now()
     return plan

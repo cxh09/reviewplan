@@ -11,11 +11,14 @@ import {
 } from 'tdesign-icons-vue-next'
 
 import { categoryColor, levelTheme } from '@/data/plaza'
+import recitations from '@/data/recitations'
+import RecitationOverlay from '@/components/RecitationOverlay.vue'
 import { DEFAULT_SLOT_MINUTES, TIMELINE_HOURS, usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
 import { useSyncStore } from '@/stores/sync'
-import { createShare, uploadFile } from '@/utils/api'
+import { createShare, defaultApiBase, resolveFileUrl, uploadFile } from '@/utils/api'
 import { isOnline } from '@/utils/connection'
+import { findRecitation } from '@/utils/recitation'
 import {
   addDays,
   dateRange,
@@ -31,6 +34,14 @@ import {
 const planStore = usePlanStore()
 const plazaStore = usePlazaStore()
 const syncStore = useSyncStore()
+
+/**
+ * 附件（/uploads/xxx）渲染基准：优先用设置里的服务端地址，
+ * 未配置时回退到构建期注入的默认地址 / 页面同源（前后端分离部署时
+ * 相对路径必须拼上 API 域名，否则会被打到前端静态站而 404）。
+ */
+const fileBase = computed(() => syncStore.normalizedUrl || defaultApiBase())
+const fileUrl = (url) => resolveFileUrl(url, fileBase.value)
 
 // ---------- 分享：选择日期范围，生成 /share/xxxx 只读链接 ----------
 
@@ -68,7 +79,8 @@ async function generateShare() {
       shareStart.value,
       shareEnd.value,
     )
-    // 分享页由服务端同源托管，链接以当前页面来源为准，避免带上设置里的内网/失效地址
+    // 分享链接指向当前页面域名（前端静态站托管的 /share 路由）；
+    // 分享页内的接口与附件地址由构建期注入的默认服务端决定，不随设置变化
     shareUrl.value = `${window.location.origin}/share/${res.code}`
     MessagePlugin.success('分享链接已生成')
   } catch (err) {
@@ -950,15 +962,25 @@ const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 /** 预览图目标体积：1MB */
 const PREVIEW_MAX_BYTES = 1024 * 1024
 
-/** 计划块右下角小徽标：已完成且填了任意一项完成详情 */
+/** 计划块右下角小徽标：已完成且填了任意一项完成详情（背诵结果也算） */
 function hasCompletion(plan) {
-  return Boolean(plan.done && (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length))
+  return Boolean(
+    plan.done &&
+      (plan.doneNote || plan.doneImages?.length || plan.doneFiles?.length || plan.recite),
+  )
 }
+
+// ---------- 古诗文背诵：命中内置文本库的条目在详情面板提供背诵入口 ----------
+
+const reciteVisible = ref(false)
+const detailReciteEntry = computed(() =>
+  detailPlan.value ? findRecitation(detailPlan.value.link, detailPlan.value.title, recitations) : null,
+)
 
 /** 打开预览：传入整组图片与当前点击的下标，支持左右切换；每次打开重置回压缩态 */
 function openImageViewer(list, index) {
   viewerSource.value = list
-  viewerImages.value = list.map((img) => img.preview || img.url)
+  viewerImages.value = list.map((img) => fileUrl(img.preview || img.url))
   viewerOriginals.value = list.map(() => false)
   viewerIndex.value = index
   viewerVisible.value = true
@@ -974,7 +996,7 @@ function showViewerOriginal() {
   const img = viewerSource.value[viewerIndex.value]
   if (!img) return
   viewerOriginals.value[viewerIndex.value] = true
-  viewerImages.value[viewerIndex.value] = img.url
+  viewerImages.value[viewerIndex.value] = fileUrl(img.url)
 }
 
 function fileToBase64(file) {
@@ -1403,6 +1425,21 @@ watch(
             <!-- 完成详情：标记完成后提交文字 / 图片 / 附件说明完成情况 -->
             <div v-if="detailPlan && detailPlan.done" class="form-item completion">
               <label class="form-label">完成详情</label>
+              <!-- 背诵结果：正确率 + 不会的字 / 句子（与分享页展示同步） -->
+              <div v-if="detailPlan.recite" class="recite-result">
+                <div class="recite-result__head">
+                  <span class="recite-result__rate">背诵正确率 {{ detailPlan.recite.rate }}%</span>
+                  <span class="recite-result__total">共 {{ detailPlan.recite.total }} 空</span>
+                </div>
+                <div v-if="detailPlan.recite.wrongChars?.length" class="recite-result__chars">
+                  <span v-for="(ch, i) in detailPlan.recite.wrongChars" :key="i" class="recite-result__char">
+                    {{ ch }}
+                  </span>
+                </div>
+                <ul v-if="detailPlan.recite.wrongSentences?.length" class="recite-result__sents">
+                  <li v-for="(sent, i) in detailPlan.recite.wrongSentences" :key="i">{{ sent }}</li>
+                </ul>
+              </div>
               <t-textarea
                 v-model="detailForm.doneNote"
                 placeholder="说明一下完成情况，选填"
@@ -1415,7 +1452,7 @@ watch(
                   class="completion__thumb"
                 >
                   <img
-                    :src="img.preview || img.url"
+                    :src="fileUrl(img.preview || img.url)"
                     :alt="img.name"
                     @click="openImageViewer(detailForm.doneImages, index)"
                   />
@@ -1436,7 +1473,7 @@ watch(
                   class="completion__file"
                 >
                   <a
-                    :href="file.url"
+                    :href="fileUrl(file.url)"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="completion__file-link"
@@ -1502,6 +1539,12 @@ watch(
                 class="detail__hidden-input"
                 @change="onDetailFilesPicked"
               />
+            </div>
+
+            <div v-if="detailReciteEntry" class="detail__actions">
+              <t-button block theme="primary" variant="outline" @click="reciteVisible = true">
+                古诗文背诵（{{ detailReciteEntry.title }}）
+              </t-button>
             </div>
 
             <div class="detail__actions">
@@ -1626,6 +1669,13 @@ watch(
         </div>
       </div>
     </t-dialog>
+
+    <!-- 古诗文挖空背诵：全屏遮罩，完成时写 recite + done -->
+    <RecitationOverlay
+      v-if="reciteVisible && detailPlan && detailReciteEntry"
+      :plan="detailPlan"
+      @close="reciteVisible = false"
+    />
 
     <!-- 完成详情图片预览：TDesign ImageViewer（缩放/旋转/切换）；默认压缩版，点「查看原图」才加载原图 -->
     <t-image-viewer
@@ -2612,6 +2662,56 @@ watch(
   font-size: 15px;
   line-height: 1;
   pointer-events: none;
+  color: var(--td-text-color-secondary);
+}
+
+/* ---------- 背诵结果块（详情面板与分享页同款样式） ---------- */
+.recite-result {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.recite-result__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 18px;
+}
+
+.recite-result__rate {
+  font-weight: 700;
+  color: var(--td-brand-color);
+}
+
+.recite-result__total {
+  color: var(--td-text-color-secondary);
+}
+
+.recite-result__chars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.recite-result__char {
+  min-width: 28px;
+  padding: 2px 6px;
+  text-align: center;
+  font-size: 18px;
+  color: var(--td-error-color);
+  background: var(--td-error-color-light);
+  border-radius: 4px;
+}
+
+.recite-result__sents {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 16px;
+  line-height: 1.7;
   color: var(--td-text-color-secondary);
 }
 

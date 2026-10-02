@@ -15,6 +15,7 @@ import {
 } from 'tdesign-icons-vue-next'
 
 import CollectionDialog from '@/components/CollectionDialog.vue'
+import PlazaBatchItemDialog from '@/components/PlazaBatchItemDialog.vue'
 import PlazaItemDialog from '@/components/PlazaItemDialog.vue'
 import { usePlazaStore } from '@/stores/plaza'
 import { isOnline } from '@/utils/connection'
@@ -163,6 +164,26 @@ function submitItem(payload) {
   MessagePlugin.success(`「${payload.title}」已加入合集`)
 }
 
+// ---------- 弹窗：批量添加日程 ----------
+
+const batchDialogVisible = ref(false)
+const batchCollectionId = ref('')
+
+function openBatchCreateItem(collectionId) {
+  batchCollectionId.value = collectionId
+  batchDialogVisible.value = true
+}
+
+/** 供批量弹窗逐条回调：成功入集返回 true，写入失败（只读 / 离线）返回 false */
+function batchAddItem(payload) {
+  const item = plazaStore.addItem(batchCollectionId.value, payload)
+  if (!item) return false
+  if (!expandedIds.value.has(batchCollectionId.value)) {
+    expandedIds.value = new Set(expandedIds.value).add(batchCollectionId.value)
+  }
+  return true
+}
+
 function confirmRemoveItem(collection, item) {
   const dialog = DialogPlugin.confirm({
     header: '删除日程',
@@ -274,6 +295,15 @@ function goSchedule() {
             </t-button>
             <t-button
               size="small"
+              theme="default"
+              variant="outline"
+              @click="openBatchCreateItem(collection.id)"
+            >
+              <template #icon><AddIcon /></template>
+              批量添加
+            </t-button>
+            <t-button
+              size="small"
               variant="text"
               shape="square"
               @click="openEditCollection(collection)"
@@ -369,6 +399,11 @@ function goSchedule() {
       v-model:visible="itemDialogVisible"
       :item="editingItem"
       @submit="submitItem"
+    />
+
+    <PlazaBatchItemDialog
+      v-model:visible="batchDialogVisible"
+      :add="batchAddItem"
     />
   </div>
 </template>

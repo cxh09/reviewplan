@@ -46,4 +46,13 @@ export default [
       globals: { ...globals.node },
     },
   },
+  {
+    // 仓库根的构建/抓取脚本同样跑在 Node 环境
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+  },
 ]

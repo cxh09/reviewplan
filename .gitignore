@@ -35,3 +35,5 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+# 生产构建的默认服务端地址（只有域名，无密钥，随仓库分发）
+!.env.production
