@@ -137,7 +137,7 @@ function handleMenuChange(value) {
     </Transition>
 
     <t-content class="basic-layout__content">
-      <div class="page-container" :class="{ 'page-container--wide': route.name === 'schedule' }">
+      <div class="page-container">
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" />
@@ -178,15 +178,15 @@ function handleMenuChange(value) {
 }
 
 .basic-layout__logo {
-  width: 48px;
-  height: 48px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
   object-fit: cover;
   display: block;
 }
 
 .basic-layout__title {
-  font-size: 24px;
+  font-size: 16px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -202,12 +202,12 @@ function handleMenuChange(value) {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  font-size: 27px;
+  font-size: 18px;
 }
 
 .basic-layout__countdown {
   margin-right: 4px;
-  font-size: 20px;
+  font-size: 13px;
 }
 
 .basic-layout__content {
@@ -216,7 +216,7 @@ function handleMenuChange(value) {
 }
 
 .basic-layout__notice {
-  font-size: 20px;
+  font-size: 13px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
 

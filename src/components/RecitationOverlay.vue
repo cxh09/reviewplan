@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next/es/message'
 
 import recitations from '@/data/recitations'
@@ -31,8 +31,18 @@ const puzzle = ref(null)
 const session = ref(null)
 const tick = ref(0) // session 是普通对象，改判分后自增触发模板刷新
 const filled = reactive({}) // blankId → 已正确填入的字
-const activeBlank = ref(-1) // 点选模式下当前选中的空
-const inputRef = ref(null)
+const activeBlank = ref(-1) // 当前选中的空（点选/输入模式共用）
+/**
+ * 聚焦当前激活空的输入框。不依赖模板 ref（旧 input 销毁、新 input 重建时
+ * ref 捕获时机不可靠），而是在 DOM 更新后（nextTick）按 data-blank 属性查询。
+ */
+function focusActiveInput() {
+  nextTick(() => {
+    if (activeBlank.value < 0) return
+    const el = document.querySelector(`.recite__input[data-blank="${activeBlank.value}"]`)
+    if (el) el.focus()
+  })
+}
 
 function rebuild() {
   puzzle.value = buildPuzzle(entry, level.value)
@@ -94,10 +104,7 @@ function onChipTap(ch) {
 function onBlankTap(id) {
   if (session.value.isCorrect(id)) return
   activeBlank.value = id
-  if (inputMode.value) {
-    // 等模板把 input 渲染出来再聚焦
-    requestAnimationFrame(() => inputRef.value?.focus())
-  }
+  if (inputMode.value) focusActiveInput()
 }
 
 function onInput(id, event) {
@@ -105,13 +112,16 @@ function onInput(id, event) {
   event.target.value = ''
   if (!ch) return
   fillBlank(id, ch)
+  // 打完一个字自动前进到下一个空并聚焦光标，无需再逐个点击；
+  // 若打错（未前进）则重新聚焦当前空，可继续输入
+  focusActiveInput()
 }
 
 function switchMode(toInput) {
   inputMode.value = toInput
   if (!toInput) return
   if (activeBlank.value < 0) activeBlank.value = puzzle.value.blanks[0]?.id ?? -1
-  requestAnimationFrame(() => inputRef.value?.focus())
+  focusActiveInput()
 }
 
 function switchLevel(value) {
@@ -177,7 +187,7 @@ function save() {
                 <template v-if="blankState(cell.blankId) === 'right'">{{ filled[cell.blankId] }}</template>
                 <input
                   v-else-if="activeBlank === cell.blankId"
-                  ref="inputRef"
+                  :data-blank="cell.blankId"
                   class="recite__input"
                   maxlength="1"
                   @input="onInput(cell.blankId, $event)"
@@ -304,10 +314,11 @@ function save() {
   border-bottom-color: var(--td-error-color);
 }
 
-.recite__blank.is-open.is-active,
-.recite__blank.is-wrong.is-active {
-  background: var(--td-brand-color-light);
-  border-bottom-color: var(--td-brand-color);
+/* 选中态只加一圈描边环，不覆盖对/错本身的颜色：
+   否则「点错后该空仍是选中态」会被蓝色盖住红色，用户看不到判错反馈 */
+.recite__blank.is-active {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px var(--td-brand-color);
 }
 
 .recite__input {

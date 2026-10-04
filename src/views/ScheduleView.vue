@@ -13,6 +13,7 @@ import {
 import { categoryColor, levelTheme } from '@/data/plaza'
 import recitations from '@/data/recitations'
 import RecitationOverlay from '@/components/RecitationOverlay.vue'
+import ImageViewer from '@/components/ImageViewer.vue'
 import { DEFAULT_SLOT_MINUTES, TIMELINE_HOURS, usePlanStore } from '@/stores/plan'
 import { usePlazaStore } from '@/stores/plaza'
 import { useSyncStore } from '@/stores/sync'
@@ -157,8 +158,8 @@ function clamp(value, min, max) {
 const FIRST_HOUR = TIMELINE_HOURS[0]
 const END_HOUR = TIMELINE_HOURS[TIMELINE_HOURS.length - 1] + 1
 const HOURS_COUNT = TIMELINE_HOURS.length
-/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行，随 1.5 倍字号同步加高） */
-const LANE_HEIGHT = 114
+/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行） */
+const LANE_HEIGHT = 76
 /**
  * 短日程的最小显示宽度（小时）：不足 1.5 小时的块向右撑到 1.5 小时格，
  * 保证单行标题与「时间 + 已完成」徽标都放得下，不被裁切。
@@ -945,16 +946,18 @@ const detailImageInput = ref(null)
 const detailFileInput = ref(null)
 /** 当前正在上传的类型：image | file | ''，用于按钮 loading */
 const detailUploading = ref('')
-/** 图片预览：用 TDesign ImageViewer；默认展示 ≤1MB 的压缩版，点「查看原图」才加载原图 */
+/** 图片预览：自实现 ImageViewer（跟手缩放/拖拽/左右滑动切图），默认展示压缩预览，可切原图 */
 const viewerVisible = ref(false)
-/** 预览地址列表（切原图时会被替换）与对应的原始完成图片 */
-const viewerImages = ref([])
 const viewerSource = ref([])
 const viewerIndex = ref(0)
-/** 每张图片是否已切换为原图 */
-const viewerOriginals = ref([])
-/** t-image-viewer 不传 trigger 时会渲染默认的「预览」占位块，用空触发器覆盖掉 */
-const emptyTrigger = () => null
+/** 传给预览组件的条目：src=压缩预览地址，original=原图地址，name=文件名 */
+const viewerItems = computed(() =>
+  viewerSource.value.map((img) => ({
+    src: fileUrl(img.preview || img.url),
+    original: fileUrl(img.url),
+    name: img.name || '',
+  })),
+)
 
 const MAX_DONE_IMAGES = 9
 const MAX_DONE_FILES = 9
@@ -977,26 +980,11 @@ const detailReciteEntry = computed(() =>
   detailPlan.value ? findRecitation(detailPlan.value.link, detailPlan.value.title, recitations) : null,
 )
 
-/** 打开预览：传入整组图片与当前点击的下标，支持左右切换；每次打开重置回压缩态 */
+/** 打开预览：传入整组图片与当前点击的下标，支持左右切换 */
 function openImageViewer(list, index) {
   viewerSource.value = list
-  viewerImages.value = list.map((img) => fileUrl(img.preview || img.url))
-  viewerOriginals.value = list.map(() => false)
   viewerIndex.value = index
   viewerVisible.value = true
-}
-
-/** 当前图是否有原图可看（有压缩版且尚未切换） */
-const viewerCanViewOriginal = computed(() => {
-  const img = viewerSource.value[viewerIndex.value]
-  return Boolean(img?.preview && img.preview !== img.url && !viewerOriginals.value[viewerIndex.value])
-})
-
-function showViewerOriginal() {
-  const img = viewerSource.value[viewerIndex.value]
-  if (!img) return
-  viewerOriginals.value[viewerIndex.value] = true
-  viewerImages.value[viewerIndex.value] = fileUrl(img.url)
 }
 
 function fileToBase64(file) {
@@ -1368,8 +1356,8 @@ watch(
       </t-card>
     </div>
 
-    <!-- 日程详情：把日程表往左挤压，从右侧展开 -->
-    <div class="detail-panel" :class="{ 'is-open': detailVisible }">
+    <!-- 日程详情：居中弹窗（点遮罩或 Esc 关闭） -->
+    <div class="detail-panel" :class="{ 'is-open': detailVisible }" @click.self="closeDetail">
       <div class="detail-panel__inner">
         <t-card :bordered="false" class="detail-card">
           <template #title>
@@ -1478,20 +1466,7 @@ watch(
                     rel="noopener noreferrer"
                     class="completion__file-link"
                   >
-                    <svg
-                      class="file-clip"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <path
-                        d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"
-                      />
-                    </svg>
+                    <LinkIcon />
                     {{ file.name || file.url.split('/').pop() }}
                   </a>
                   <button
@@ -1677,23 +1652,8 @@ watch(
       @close="reciteVisible = false"
     />
 
-    <!-- 完成详情图片预览：TDesign ImageViewer（缩放/旋转/切换）；默认压缩版，点「查看原图」才加载原图 -->
-    <t-image-viewer
-      v-model:visible="viewerVisible"
-      v-model:index="viewerIndex"
-      :images="viewerImages"
-      :close-on-overlay="true"
-      :trigger="emptyTrigger"
-      :z-index="2600"
-    />
-    <button
-      v-if="viewerVisible && viewerCanViewOriginal"
-      type="button"
-      class="image-viewer__original"
-      @click="showViewerOriginal"
-    >
-      查看原图
-    </button>
+    <!-- 完成详情图片预览：自实现 ImageViewer（跟手缩放/拖拽/滑动切图 + 查看原图/下载/关闭） -->
+    <ImageViewer v-model:visible="viewerVisible" v-model:index="viewerIndex" :items="viewerItems" />
   </div>
 </template>
 
@@ -1725,7 +1685,7 @@ watch(
 }
 
 .schedule__toolbar-hint {
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-secondary);
 }
 
@@ -1744,7 +1704,7 @@ watch(
 
 .share-form__hint {
   margin: 0;
-  font-size: 18px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--td-text-color-secondary);
 }
@@ -1756,9 +1716,9 @@ watch(
 }
 
 .share-form__label {
-  width: 96px;
+  width: 64px;
   flex-shrink: 0;
-  font-size: 20px;
+  font-size: 13px;
   color: var(--td-text-color-secondary);
 }
 
@@ -1789,8 +1749,8 @@ watch(
 /* ---------- 日历网格 ---------- */
 
 .calendar {
-  --calendar-date-width: 177px;
-  --calendar-hour-width: 186px;
+  --calendar-date-width: 118px;
+  --calendar-hour-width: 124px;
   position: relative;
   /* 撑满卡片剩余高度，随视口自适应 */
   flex: 1;
@@ -1849,7 +1809,7 @@ watch(
   padding: 10px 12px;
   border-right: 1px solid var(--td-component-stroke);
   border-bottom: 1px solid var(--td-component-stroke);
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--td-text-color-secondary);
   background-color: var(--td-bg-color-secondarycontainer);
@@ -1863,7 +1823,7 @@ watch(
 .calendar__hour {
   padding: 10px 6px;
   text-align: center;
-  font-size: 18px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
   border-right: 1px solid var(--td-component-stroke);
@@ -1897,12 +1857,12 @@ watch(
 }
 
 .calendar__date-week {
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 }
 
 .calendar__date-md {
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1943,7 +1903,7 @@ watch(
 }
 
 .calendar__placeholder-text {
-  font-size: 17px;
+  font-size: 11px;
   color: var(--td-brand-color);
 }
 
@@ -1951,12 +1911,12 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 33px;
-  height: 33px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
   border-radius: 50%;
-  font-size: 21px;
+  font-size: 14px;
   color: var(--td-text-color-placeholder);
   background-color: transparent;
   opacity: 0;
@@ -2040,7 +2000,7 @@ watch(
 }
 
 .plan-block__title {
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
   /* 标题最多折两行完整展示，超出部分省略并用 title 属性兼容全名 */
@@ -2057,7 +2017,7 @@ watch(
   gap: 6px;
   margin-top: 2px;
   overflow: hidden;
-  font-size: 17px;
+  font-size: 11px;
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
 }
@@ -2074,7 +2034,7 @@ watch(
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 10px;
+  width: 7px;
   cursor: col-resize;
   transition: background-color var(--rp-duration-fast) ease;
 }
@@ -2106,13 +2066,13 @@ watch(
 }
 
 .todo-panel.is-open {
-  width: 780px;
+  width: 520px;
   margin-left: 16px;
 }
 
 .todo-panel__inner {
   display: flex;
-  width: 780px;
+  width: 520px;
   height: 100%;
   transform: translateX(32px);
   opacity: 0;
@@ -2134,7 +2094,7 @@ watch(
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  width: 780px;
+  width: 520px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--td-radius-large);
   background-color: var(--td-bg-color-container);
@@ -2160,7 +2120,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 23px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -2168,12 +2128,12 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 33px;
-  height: 33px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
   border-radius: 4px;
-  font-size: 23px;
+  font-size: 15px;
   color: var(--td-text-color-placeholder);
   background-color: transparent;
   cursor: pointer;
@@ -2191,7 +2151,7 @@ watch(
   margin: 0 16px 12px;
   padding: 8px 10px;
   border-radius: var(--td-radius-medium);
-  font-size: 18px;
+  font-size: 12px;
   line-height: 1.65;
   color: var(--td-text-color-secondary);
   background-color: var(--td-bg-color-secondarycontainer);
@@ -2233,14 +2193,14 @@ watch(
   justify-content: space-between;
   gap: 8px;
   margin-top: 4px;
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--td-text-color-secondary);
 }
 
 .plaza-group__count {
   flex-shrink: 0;
-  font-size: 17px;
+  font-size: 11px;
   font-weight: 400;
   color: var(--td-text-color-placeholder);
 }
@@ -2251,7 +2211,7 @@ watch(
   padding: 4px 0;
   border: none;
   background: none;
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-brand-color);
   cursor: pointer;
 }
@@ -2302,7 +2262,7 @@ watch(
 }
 
 .todo-chip__title {
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
   /* 名字再长也不折到第二行：单行省略，悬停看全名 */
@@ -2316,7 +2276,7 @@ watch(
   align-items: center;
   gap: 6px;
   margin-top: 4px;
-  font-size: 17px;
+  font-size: 11px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -2331,10 +2291,10 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 33px;
-  height: 33px;
+  width: 22px;
+  height: 22px;
   border-radius: 4px;
-  font-size: 21px;
+  font-size: 14px;
   color: var(--td-text-color-secondary);
   cursor: pointer;
 }
@@ -2348,47 +2308,48 @@ watch(
   color: var(--td-error-color);
 }
 
-/* ---------- 日程详情面板 ---------- */
+/* ---------- 日程详情弹窗 ---------- */
 
-/* 外层负责宽度过渡，内层保持固定宽度，这样展开时内容不会被挤变形 */
+/* 日程详情：居中弹窗。半透明遮罩 + 居中卡片，卡片超高时内部滚动 */
 .detail-panel {
-  flex: none;
-  width: 0;
-  overflow: hidden;
-  transition:
-    width var(--rp-duration-panel) var(--rp-ease-out),
-    margin-left var(--rp-duration-panel) var(--rp-ease-out);
+  position: fixed;
+  inset: 0;
+  z-index: 2400; /* 低于背诵遮罩(2500)与图片预览(2600)，保证它们能盖在本弹窗之上 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.24s ease;
 }
 
 .detail-panel.is-open {
-  width: 570px;
-  margin-left: 16px;
+  opacity: 1;
+  pointer-events: auto;
 }
 
-/* 内层做"跟进"动画：收起时快速淡出，展开时轻微右移滑入 + 淡入，错峰于宽度动画；
-   高度跟随面板并内部滚动，内容多时（完成详情图片/附件等）可上下滑动 */
+/* 内层卡片：淡入 + 轻微上浮缩放；内容多时内部滚动 */
 .detail-panel__inner {
-  width: 570px;
-  height: 100%;
+  width: 460px;
+  max-width: 100%;
+  max-height: 82vh;
   overflow-y: auto;
   overscroll-behavior: contain;
-  transform: translateX(32px);
-  opacity: 0;
-  transition:
-    transform 0.16s ease-in,
-    opacity 0.16s ease-in;
+  background: var(--td-bg-color-container);
+  border-radius: var(--td-radius-large);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 28%);
+  transform: translateY(12px) scale(0.96);
+  transition: transform 0.26s var(--rp-ease-out);
 }
 
 .detail-panel.is-open .detail-panel__inner {
-  transform: translateX(0);
-  opacity: 1;
-  transition:
-    transform 0.5s var(--rp-ease-out) 0.06s,
-    opacity 0.32s ease 0.1s;
+  transform: translateY(0) scale(1);
 }
 
 .detail-card__title {
-  font-size: 23px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -2405,12 +2366,12 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
   border-radius: 4px;
-  font-size: 24px;
+  font-size: 16px;
   color: var(--td-text-color-placeholder);
   background-color: transparent;
   cursor: pointer;
@@ -2434,14 +2395,14 @@ watch(
 }
 
 .detail__title {
-  font-size: 23px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.45;
 }
 
 .detail__meta {
   margin-top: 4px;
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -2450,7 +2411,7 @@ watch(
   align-items: center;
   gap: 4px;
   margin-top: 6px;
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-brand-color);
   text-decoration: none;
 }
@@ -2476,7 +2437,7 @@ watch(
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--td-text-color-secondary);
 }
@@ -2487,29 +2448,19 @@ watch(
 }
 
 @media (max-width: 1100px) {
-  .detail-panel.is-open {
-    width: 450px;
-  }
-
-  .detail-panel__inner {
-    width: 450px;
-  }
-
   .todo-panel.is-open {
-    width: 630px;
+    width: 420px;
   }
 
   .todo-panel__inner,
   .todo-dock__panel {
-    width: 630px;
+    width: 420px;
   }
 }
 
-/* 视口宽度不够「日程表最小可用宽 + 面板 + 间距」时，
-   面板不再挤压日程表，改为右侧浮层盖在日程表上 */
+/* 广场面板：视口不够宽时不再挤压日程表，改为右侧浮层盖在日程表上 */
 @media (max-width: 1323px) {
-  .todo-panel,
-  .detail-panel {
+  .todo-panel {
     position: absolute;
     top: 0;
     right: 0;
@@ -2517,23 +2468,16 @@ watch(
     z-index: 30;
   }
 
-  .todo-panel.is-open,
-  .detail-panel.is-open {
+  .todo-panel.is-open {
     margin-left: 0;
-  }
-
-  /* 详情面板浮层化后补卡片投影，与广场面板观感一致 */
-  .detail-panel__inner {
-    border-radius: var(--td-radius-large);
-    box-shadow: 0 8px 28px rgb(0 0 0 / 14%);
   }
 }
 
 @media (max-width: 768px) {
   /* 小屏收窄列宽，18 列才不至于要横向拖很久 */
   .calendar {
-    --calendar-date-width: 126px;
-    --calendar-hour-width: 138px;
+    --calendar-date-width: 84px;
+    --calendar-hour-width: 92px;
   }
 
   /* 手机宽度不足 480px：取消最小宽保护，避免整页横向溢出 */
@@ -2541,13 +2485,18 @@ watch(
     min-width: 0;
   }
 
+  /* 小屏弹窗贴近边缘，留小边距即可 */
+  .detail-panel {
+    padding: 12px;
+  }
+
   .todo-panel.is-open {
-    width: 480px;
+    width: 320px;
   }
 
   .todo-panel__inner,
   .todo-dock__panel {
-    width: 480px;
+    width: 320px;
   }
 
   .form-row {
@@ -2571,8 +2520,8 @@ watch(
 
 .completion__thumb {
   position: relative;
-  width: 108px;
-  height: 108px;
+  width: 72px;
+  height: 72px;
 }
 
 .completion__thumb img {
@@ -2587,13 +2536,13 @@ watch(
 
 .completion__remove {
   position: absolute;
-  top: -9px;
-  right: -9px;
+  top: -6px;
+  right: -6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 27px;
-  height: 27px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -2603,8 +2552,8 @@ watch(
 }
 
 .completion__remove :deep(svg) {
-  width: 18px;
-  height: 18px;
+  width: 12px;
+  height: 12px;
 }
 
 .completion__files {
@@ -2630,18 +2579,12 @@ watch(
   align-items: center;
   gap: 4px;
   min-width: 0;
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-brand-color);
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.completion__file-link .file-clip {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
 }
 
 .completion__file .completion__remove {
@@ -2659,7 +2602,7 @@ watch(
   position: absolute;
   right: 4px;
   bottom: 2px;
-  font-size: 15px;
+  font-size: 10px;
   line-height: 1;
   pointer-events: none;
   color: var(--td-text-color-secondary);
@@ -2717,23 +2660,7 @@ watch(
 
 .plan-block__evidence svg {
   display: block;
-  width: 18px;
-  height: 18px;
-}
-
-/* 「查看原图」悬浮按钮：盖在 ImageViewer（z-index 2600）之上 */
-.image-viewer__original {
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2700;
-  padding: 6px 16px;
-  border: none;
-  border-radius: 999px;
-  background-color: rgb(255 255 255 / 90%);
-  color: var(--td-text-color-primary);
-  font-size: 20px;
-  cursor: pointer;
+  width: 12px;
+  height: 12px;
 }
 </style>

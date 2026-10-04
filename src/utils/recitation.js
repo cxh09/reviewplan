@@ -190,10 +190,10 @@ export function createReciteSession(puzzle) {
   const wrongSentenceSet = new Set()
 
   return {
-    /** 填第 id 个空，返回本次是否正确；已首对的空拒绝再改 */
+    /** 填第 id 个空，返回本次是否正确；已正确填入的空锁定，不再改动 */
     fill(id, ch) {
       if (id < 0 || id >= puzzle.total) return false
-      if (firstTry[id] === 1) return filled[id] === ch
+      if (filled[id] !== '') return filled[id] === ch
       const blank = puzzle.blanks[id]
       const correct = ch === blank.char
       filled[id] = correct ? ch : ''
@@ -204,12 +204,14 @@ export function createReciteSession(puzzle) {
           if (blank.sentenceText) wrongSentenceSet.add(blank.sentenceText)
         }
       } else if (correct) {
-        // 首错后重对：wrong 记录保留，仅更新填充
+        // 首错后重对：wrong 记录保留（正确率仍按首次判定），仅更新填充
       }
       return correct
     },
     isCorrect(id) {
-      return firstTry[id] === 1 && filled[id] !== ''
+      // 「当前是否已正确填入」——决定空格是否显示该字；与首次对错(firstTry)解耦，
+      // 否则「先答错再答对」的空会被判为未完成显示（filled 有值却不显示）。
+      return filled[id] !== ''
     },
     isWrong(id) {
       return firstTry[id] === 2 && filled[id] === ''

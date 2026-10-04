@@ -406,10 +406,11 @@ function confirmReset() {
       <div class="settings__row">
         <div class="settings__label">
           <span class="settings__label-main">界面主题</span>
-          <span class="settings__label-tip">深色模式适合夜间复习</span>
+          <span class="settings__label-tip">默认跟随设备/浏览器的深浅色设置</span>
         </div>
         <div class="settings__control">
           <t-radio-group v-model="themeModel" variant="default-filled">
+            <t-radio-button value="system">跟随系统</t-radio-button>
             <t-radio-button value="light">浅色</t-radio-button>
             <t-radio-button value="dark">深色</t-radio-button>
           </t-radio-group>
@@ -584,7 +585,7 @@ function confirmReset() {
 }
 
 .settings__title {
-  font-size: 23px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -604,12 +605,12 @@ function confirmReset() {
 }
 
 .settings__label-main {
-  font-size: 21px;
+  font-size: 14px;
   font-weight: 500;
 }
 
 .settings__label-tip {
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -620,7 +621,7 @@ function confirmReset() {
 }
 
 .settings__picker {
-  width: 270px;
+  width: 180px;
 }
 
 .settings__alert {
@@ -629,12 +630,12 @@ function confirmReset() {
 
 .settings__control--wide {
   flex: 1;
-  min-width: 330px;
+  min-width: 220px;
   justify-content: flex-end;
 }
 
 .settings__input {
-  width: 480px;
+  width: 320px;
   max-width: 100%;
 }
 
@@ -650,7 +651,7 @@ function confirmReset() {
 }
 
 .settings__sync-text {
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -664,7 +665,7 @@ function confirmReset() {
 }
 
 .settings__preview-number {
-  font-size: 60px;
+  font-size: 40px;
   font-weight: 700;
   line-height: 1;
   background: linear-gradient(135deg, #0052d9, #00a870);
@@ -677,11 +678,11 @@ function confirmReset() {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 21px;
+  font-size: 14px;
 }
 
 .settings__preview-sub {
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -699,12 +700,12 @@ function confirmReset() {
 }
 
 .settings__stat-value {
-  font-size: 33px;
+  font-size: 22px;
   font-weight: 700;
 }
 
 .settings__stat-label {
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -720,7 +721,7 @@ function confirmReset() {
 
 .settings__note {
   margin: 16px 0 0;
-  font-size: 18px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--td-text-color-placeholder);
 }
@@ -736,8 +737,8 @@ function confirmReset() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 96px;
-  height: 96px;
+  width: 64px;
+  height: 64px;
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 50%;
@@ -745,7 +746,7 @@ function confirmReset() {
   background-color: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
   text-align: center;
-  font-size: 18px;
+  font-size: 12px;
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 }
@@ -758,19 +759,19 @@ function confirmReset() {
 
 .profile__form {
   flex: 1;
-  min-width: 360px;
+  min-width: 240px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
 .profile__input {
-  max-width: 480px;
+  max-width: 320px;
 }
 
 .profile__hint {
   margin: 0;
-  font-size: 18px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--td-text-color-placeholder);
 }

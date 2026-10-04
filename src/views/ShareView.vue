@@ -6,6 +6,7 @@ import { CheckIcon } from 'tdesign-icons-vue-next'
 import { categoryColor } from '@/data/plaza'
 import { TIMELINE_HOURS } from '@/stores/plan'
 import { defaultApiBase, fetchShare, resolveFileUrl } from '@/utils/api'
+import ImageViewer from '@/components/ImageViewer.vue'
 import {
   dateRange,
   diffDays,
@@ -22,8 +23,8 @@ const route = useRoute()
 const FIRST_HOUR = TIMELINE_HOURS[0]
 const END_HOUR = TIMELINE_HOURS[TIMELINE_HOURS.length - 1] + 1
 const HOURS_COUNT = TIMELINE_HOURS.length
-/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行，随 1.5 倍字号同步加高） */
-const LANE_HEIGHT = 114
+/** 同一时间段重叠时上下分层，每层高度（需容纳两行标题 + 时间行） */
+const LANE_HEIGHT = 76
 /** 短日程的最小显示宽度（小时）：与日程表一致，窄块向右撑到 1.5 小时格，止于同车道下一块 */
 const MIN_DISPLAY_HOURS = 1.5
 
@@ -174,16 +175,18 @@ const rangeLabel = computed(() => {
 const completionPlan = ref(null)
 /** 关闭动画进行中：动画播完才真正移除 DOM */
 const completionClosing = ref(false)
-/** 图片预览：用 TDesign ImageViewer；默认展示 ≤1MB 压缩版，点「查看原图」才加载原图 */
+/** 图片预览：自实现 ImageViewer（跟手缩放/拖拽/左右滑动切图），默认展示压缩预览，可切原图 */
 const viewerVisible = ref(false)
-/** 预览地址列表（切原图时会被替换）与对应的原始完成图片 */
-const viewerImages = ref([])
 const viewerSource = ref([])
 const viewerIndex = ref(0)
-/** 每张图片是否已切换为原图 */
-const viewerOriginals = ref([])
-/** t-image-viewer 不传 trigger 时会渲染默认的「预览」占位块，用空触发器覆盖掉 */
-const emptyTrigger = () => null
+/** 传给预览组件的条目：src=压缩预览地址，original=原图地址，name=文件名 */
+const viewerItems = computed(() =>
+  viewerSource.value.map((img) => ({
+    src: fileUrl(img.preview || img.url),
+    original: fileUrl(img.url),
+    name: img.name || '',
+  })),
+)
 
 function hasCompletion(plan) {
   return Boolean(
@@ -214,23 +217,8 @@ function finishCompletionClose() {
 /** 打开预览：传入整组图片与当前点击的下标，支持左右切换 */
 function openViewer(list, index) {
   viewerSource.value = list
-  viewerImages.value = list.map((img) => fileUrl(img.preview || img.url))
-  viewerOriginals.value = list.map(() => false)
   viewerIndex.value = index
   viewerVisible.value = true
-}
-
-/** 当前图是否有原图可看（有压缩版且尚未切换） */
-const viewerCanViewOriginal = computed(() => {
-  const img = viewerSource.value[viewerIndex.value]
-  return Boolean(img?.preview && img.preview !== img.url && !viewerOriginals.value[viewerIndex.value])
-})
-
-function showViewerOriginal() {
-  const img = viewerSource.value[viewerIndex.value]
-  if (!img) return
-  viewerOriginals.value[viewerIndex.value] = true
-  viewerImages.value[viewerIndex.value] = fileUrl(img.url)
 }
 </script>
 
@@ -393,43 +381,14 @@ function showViewerOriginal() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            <svg
-              class="file-clip"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path
-                d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"
-              />
-            </svg>
-            {{ file.name || file.url.split('/').pop() }}
+            📎 {{ file.name || file.url.split('/').pop() }}
           </a>
         </div>
       </div>
     </div>
 
-    <!-- 图片预览：TDesign ImageViewer（缩放/旋转/切换）；默认压缩版，点「查看原图」才加载原图 -->
-    <t-image-viewer
-      v-model:visible="viewerVisible"
-      v-model:index="viewerIndex"
-      :images="viewerImages"
-      :close-on-overlay="true"
-      :trigger="emptyTrigger"
-      :z-index="2600"
-    />
-    <button
-      v-if="viewerVisible && viewerCanViewOriginal"
-      type="button"
-      class="image-viewer__original"
-      @click="showViewerOriginal"
-    >
-      查看原图
-    </button>
+    <!-- 图片预览：自实现 ImageViewer（跟手缩放/拖拽/滑动切图 + 查看原图/下载/关闭） -->
+    <ImageViewer v-model:visible="viewerVisible" v-model:index="viewerIndex" :items="viewerItems" />
   </div>
 </template>
 
@@ -452,7 +411,7 @@ function showViewerOriginal() {
 }
 
 .share__brand {
-  font-size: 24px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -461,13 +420,13 @@ function showViewerOriginal() {
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  font-size: 20px;
+  font-size: 13px;
   color: var(--td-text-color-secondary);
 }
 
 .share__author-avatar {
-  width: 36px;
-  height: 36px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   object-fit: cover;
   border: 1px solid var(--td-component-stroke);
@@ -483,7 +442,7 @@ function showViewerOriginal() {
 .share__state {
   padding: 48px 0;
   text-align: center;
-  font-size: 21px;
+  font-size: 14px;
   color: var(--td-text-color-secondary);
 }
 
@@ -494,7 +453,7 @@ function showViewerOriginal() {
 .share__foot {
   padding: 12px 20px;
   text-align: center;
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
   border-top: 1px solid var(--td-component-stroke);
 }
@@ -502,8 +461,8 @@ function showViewerOriginal() {
 /* ---------- 只读日历网格 ---------- */
 
 .calendar {
-  --calendar-date-width: 144px;
-  --calendar-hour-width: 180px;
+  --calendar-date-width: 96px;
+  --calendar-hour-width: 120px;
   position: relative;
   overflow: auto;
   border-top: 1px solid var(--td-component-stroke);
@@ -538,7 +497,7 @@ function showViewerOriginal() {
   padding: 10px 12px;
   border-right: 1px solid var(--td-component-stroke);
   border-bottom: 1px solid var(--td-component-stroke);
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--td-text-color-secondary);
   background-color: var(--td-bg-color-secondarycontainer);
@@ -552,7 +511,7 @@ function showViewerOriginal() {
 .calendar__hour {
   padding: 10px 6px;
   text-align: center;
-  font-size: 18px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
   border-right: 1px solid var(--td-component-stroke);
@@ -586,12 +545,12 @@ function showViewerOriginal() {
 }
 
 .calendar__date-week {
-  font-size: 18px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 }
 
 .calendar__date-md {
-  font-size: 20px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -649,7 +608,7 @@ function showViewerOriginal() {
 }
 
 .plan-block__title {
-  font-size: 18px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
   /* 标题最多折两行完整展示，超出部分省略并用 title 属性兼容全名 */
@@ -666,7 +625,7 @@ function showViewerOriginal() {
   gap: 6px;
   margin-top: 2px;
   overflow: hidden;
-  font-size: 17px;
+  font-size: 11px;
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
 }
@@ -689,7 +648,7 @@ function showViewerOriginal() {
   position: absolute;
   right: 4px;
   bottom: 2px;
-  font-size: 15px;
+  font-size: 10px;
   line-height: 1;
   pointer-events: none;
   color: var(--td-text-color-secondary);
@@ -697,8 +656,8 @@ function showViewerOriginal() {
 
 .plan-block__evidence svg {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 12px;
+  height: 12px;
 }
 
 .completion-dialog {
@@ -724,10 +683,10 @@ function showViewerOriginal() {
 /* 底部弹层：贴底、顶部圆角、从下方滑入；桌面窄屏下限宽居中 */
 .completion-card {
   width: 100%;
-  max-width: 960px;
+  max-width: 640px;
   max-height: 80vh;
   overflow: auto;
-  padding: 27px 30px calc(27px + env(safe-area-inset-bottom));
+  padding: 18px 20px calc(18px + env(safe-area-inset-bottom));
   border-radius: var(--td-radius-large) var(--td-radius-large) 0 0;
   background-color: var(--td-bg-color-container);
   animation: completion-slide-up var(--rp-duration-base) var(--rp-ease-out);
@@ -778,14 +737,14 @@ function showViewerOriginal() {
 }
 
 .completion-card__title {
-  font-size: 23px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .completion-card__close {
   border: none;
   background: none;
-  font-size: 30px;
+  font-size: 20px;
   line-height: 1;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
@@ -843,7 +802,7 @@ function showViewerOriginal() {
 
 .completion-card__note {
   margin: 0 0 12px;
-  font-size: 20px;
+  font-size: 13px;
   line-height: 1.8;
   color: var(--td-text-color-primary);
   white-space: pre-wrap;
@@ -873,10 +832,7 @@ function showViewerOriginal() {
 }
 
 .completion-card__files a {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 20px;
+  font-size: 13px;
   color: var(--td-brand-color);
   text-decoration: none;
   overflow: hidden;
@@ -884,32 +840,10 @@ function showViewerOriginal() {
   white-space: nowrap;
 }
 
-.completion-card__files .file-clip {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-/* 「查看原图」悬浮按钮：盖在 ImageViewer（z-index 2600）之上 */
-.image-viewer__original {
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2700;
-  padding: 6px 16px;
-  border: none;
-  border-radius: 999px;
-  background-color: rgb(255 255 255 / 90%);
-  color: var(--td-text-color-primary);
-  font-size: 20px;
-  cursor: pointer;
-}
-
 @media (max-width: 768px) {
   .calendar {
-    --calendar-date-width: 114px;
-    --calendar-hour-width: 138px;
+    --calendar-date-width: 76px;
+    --calendar-hour-width: 92px;
   }
 }
 </style>
